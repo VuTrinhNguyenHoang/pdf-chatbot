@@ -1,0 +1,13 @@
+{
+  "name": "pdf-chatbot",
+  "description": "PDF chatbot final project",
+  "private": true,
+  "version": "0.0.1",
+  "author": "Vu",
+  "workspaces": ["backend", "frontend"],
+  "scripts": {
+    "frontend:dev": "yarn workspace frontend dev",
+    "frontend:build": "yarn workspace frontend build",
+    "backend:dev": "yarn workspace backend langgraph:dev"
+  }
+}
