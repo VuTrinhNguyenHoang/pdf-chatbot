@@ -1,0 +1,10 @@
+{
+  "$schema": "https://langgra.ph/schema.json",
+  "python_version": "3.11",
+  "graphs": {
+    "ingestion_graph": "./src/ingestion_graph/graph.py:graph",
+    "retrieval_graph": "./src/retrieval_graph/graph.py:graph"
+  },
+  "env": ".env",
+  "dependencies": ["."]
+}
