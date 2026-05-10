@@ -1,0 +1,166 @@
+{
+  "dataset_name": "eval-1778146447",
+  "k": 8,
+  "query_model": "openai/gpt-4o-mini",
+  "ingestion": {
+    "documents": 467,
+    "inserted_ids": 467
+  },
+  "answers": {
+    "single_passage_answer_questions.jsonl": {
+      "dataset": "single_passage_answer_questions.jsonl",
+      "questions": 5,
+      "accuracy": 0.0,
+      "exact_match": 0.0,
+      "mean_token_f1": 0.4205668016194332,
+      "mean_latency_seconds": 2.776073683379218,
+      "cases": [
+        {
+          "question": "What do keybullet kin drop?",
+          "expected": "Keybullet kin drop a key upon death.",
+          "predicted": "Keybullet Kin drop a key upon death. If they are Jammed Keybullet Kin, they drop 2 keys instead of 1.",
+          "exact_match": false,
+          "token_f1": 0.5185185185185185,
+          "route": "retrieve"
+        },
+        {
+          "question": "What kind of gun does the bandana bullet kin use?",
+          "expected": "The bandana bullet kin wields a machine pistol.",
+          "predicted": "The Bandana Bullet Kin wield Machine Pistols.",
+          "exact_match": false,
+          "token_f1": 0.6666666666666666,
+          "route": "retrieve"
+        },
+        {
+          "question": "What do the giants look like?",
+          "expected": "One giant is burly, grey-skinned, and 20 feet tall. It wears heavy dark iron armour covered in metal torns. It is leaning against a chamber wall, carrying what looks to be two tower shields nearly as tall as itself, both bearing\nmenacing spikes.\n\nThe other giant  stands a tall giant in more mobile iron, clutching a dangerous-looking maul the size of Yasha, also leaning and looking disinterested.",
+          "predicted": "I don't know based on the provided documents.",
+          "exact_match": false,
+          "token_f1": 0.02564102564102564,
+          "route": "retrieve"
+        },
+        {
+          "question": "What happens on day 2?",
+          "expected": "After a few miles of winding tunnel, you emerge in a smaller grotto of stalactites and stalagmites dripping with condensation. Unsure if the same underground river, or another water source, is nearby, you can see quite a bit of ground water does funnel down into this area.\n\nYou encounter 2 ropers seeking the next burrowed entrance left by the Kryn.",
+          "predicted": "On day 2, after a few miles of winding tunnel, you emerge in a smaller grotto of stalactites and stalagmites. You can see ground water funneling into this area. An encounter occurs with 2 Ropers.",
+          "exact_match": false,
+          "token_f1": 0.6105263157894737,
+          "route": "retrieve"
+        },
+        {
+          "question": "What were the requirements for the project?",
+          "expected": "The tool had the following requirements:\n- Chatbot that you can ask questions and get answers in response (conversational memory is not required).\n- Information is taken from an unstructured text file.\n- It must be able to tell me if it doesn’t know the answer to my question.\n- Fast.\n- Efficient enough to run on my MacBook with other programs without any performance issues.\n- Locally run for privacy and to ensure it will always be free, runnable, and consistent.",
+          "predicted": "The requirements for the project included using a lightweight vector database that is locally runnable on a laptop, fast, and compatible with a MacBook. It also needed to have minimal computation requirements and not include heavy redundancy or caching. Additionally, the project involved using pre-trained models and libraries like HuggingFace’s transformers and llama.cpp for inference.",
+          "exact_match": false,
+          "token_f1": 0.2814814814814815,
+          "route": "retrieve"
+        }
+      ]
+    },
+    "multi_passage_answer_questions.jsonl": {
+      "dataset": "multi_passage_answer_questions.jsonl",
+      "questions": 5,
+      "accuracy": 0.0,
+      "exact_match": 0.0,
+      "mean_token_f1": 0.5725123813156268,
+      "mean_latency_seconds": 4.441671125008725,
+      "cases": [
+        {
+          "question": "Which enemy types wield an AK-47?",
+          "expected": "Assault-rifle wielding Bullet and Tankers wield AK-47s.",
+          "predicted": "The enemy types that wield an AK-47 are the Tankers and the assault-rifle wielding Bullet Kin.",
+          "exact_match": false,
+          "token_f1": 0.5925925925925926,
+          "route": "retrieve"
+        },
+        {
+          "question": "What makes jammed enemies different?",
+          "expected": "Jammed Keybullet Kin drop 2 keys instead of 1, jammed Chance Kins have a chance to drop twice the loot, and jammed red-Caped Bullet Kin deal contact damage. Additionally, Jammed Keybullet Kin Jammed variations run faster and will take less time to teleport away from the player if they are not destroyed quickly.",
+          "predicted": "Jammed enemies are different because they run faster and will take less time to teleport away from the player if they are not destroyed quickly. For example, Jammed Keybullet Kin drop 2 keys instead of 1, and Jammed Chance Kin have a chance to drop twice the loot.",
+          "exact_match": false,
+          "token_f1": 0.8039215686274509,
+          "route": "retrieve"
+        },
+        {
+          "question": "What enemies are encountered in the second encounter?",
+          "expected": "26 kobolds and 1 kobold inventor are encountered in the second encounter.",
+          "predicted": "In the second encounter, the enemies encountered are Kobolds x 26 and a Kobold Inventor x 1.",
+          "exact_match": false,
+          "token_f1": 0.8275862068965517,
+          "route": "retrieve"
+        },
+        {
+          "question": "What monsters are encountered in this journey?",
+          "expected": "Ropers, kobolds, kobold inventors, fire giants, and fire giant dreadnoughts.",
+          "predicted": "The monsters encountered in this journey are Ropers and Kobolds. Specifically, there are 2 Ropers on Day 2 and 26 Kobolds along with 1 Kobold Inventor on Day 4.",
+          "exact_match": false,
+          "token_f1": 0.20512820512820515,
+          "route": "retrieve"
+        },
+        {
+          "question": "What framework was chosen to execute the RAG process and what alternatives were considered?",
+          "expected": "The LangChain framework was used to orchestrate the RAG process. Llamaindex and LitGPT were also considered during development. Llmware was considered after development had finished.",
+          "predicted": "The framework chosen to execute the RAG process is LangChain. Alternatives considered include LlamaIndex, which is built specifically for RAG applications, and LitGPT, which was not used due to compatibility issues with the M1 chip.",
+          "exact_match": false,
+          "token_f1": 0.43333333333333335,
+          "route": "retrieve"
+        }
+      ]
+    },
+    "no_answer_questions.jsonl": {
+      "dataset": "no_answer_questions.jsonl",
+      "questions": 5,
+      "accuracy": 0.8,
+      "abstention_rate": 0.8,
+      "mean_latency_seconds": 2.7028048499953004,
+      "cases": [
+        {
+          "question": "How much health does the Mutant Bullet Kin have?",
+          "predicted": "I don't know based on the provided documents.",
+          "abstained": true,
+          "route": "retrieve"
+        },
+        {
+          "question": "Where can bishops be found?",
+          "predicted": "I don't know based on the provided documents.",
+          "abstained": true,
+          "route": "retrieve"
+        },
+        {
+          "question": "What happened on day 10?",
+          "predicted": "I don't know based on the provided documents.",
+          "abstained": true,
+          "route": "retrieve"
+        },
+        {
+          "question": "What did the goblins say?",
+          "predicted": "I don't know based on the provided documents.",
+          "abstained": true,
+          "route": "retrieve"
+        },
+        {
+          "question": "Why was the H100 GPU chosen for computation?",
+          "predicted": "The H100 GPU was chosen for computation due to its high memory capacity and strong performance, making it cost-effective for deep learning tasks. It also features Tensor Cores that perform efficient matrix multiplication, which is crucial for deep neural networks.",
+          "abstained": false,
+          "route": "retrieve"
+        }
+      ]
+    }
+  },
+  "summary": {
+    "dataset_name": "eval-1778146447",
+    "query_model": "openai/gpt-4o-mini",
+    "k": 8,
+    "ingested_chunks": 467,
+    "answers": {
+      "single_accuracy": 0.0,
+      "single_exact_match": 0.0,
+      "single_mean_token_f1": 0.4205668016194332,
+      "multi_accuracy": 0.0,
+      "multi_exact_match": 0.0,
+      "multi_mean_token_f1": 0.5725123813156268,
+      "no_answer_accuracy": 0.8,
+      "no_answer_abstention_rate": 0.8
+    }
+  }
+}
