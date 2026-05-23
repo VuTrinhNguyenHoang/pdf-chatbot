@@ -1,8 +1,6 @@
 // app/api/ingest/route.ts
 import { indexConfig } from '@/constants/graphConfigs';
 import { langGraphServerClient } from '@/lib/langgraph-server';
-import { processPDF } from '@/lib/pdf';
-import { Document } from '@langchain/core/documents';
 import { NextRequest, NextResponse } from 'next/server';
 
 // Configuration constants
@@ -59,33 +57,22 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Process all PDFs into Documents
-    const allDocs: Document[] = [];
-    for (const file of files) {
-      try {
-        const docs = await processPDF(file);
-        allDocs.push(...docs);
-      } catch (error: any) {
-        console.error(`Error processing file ${file.name}:`, error);
-        // Continue processing other files; errors are logged
-      }
-    }
-
-    if (!allDocs.length) {
-      return NextResponse.json(
-        { error: 'No valid documents extracted from uploaded files' },
-        { status: 500 },
-      );
-    }
+    const sources = await Promise.all(
+      files.map(async (file) => ({
+        filename: file.name,
+        mimeType: file.type,
+        contentBase64: Buffer.from(await file.arrayBuffer()).toString('base64'),
+      })),
+    );
 
     // Run the ingestion graph
     const thread = await langGraphServerClient.createThread();
-    const ingestionRun = await langGraphServerClient.client.runs.wait(
+    await langGraphServerClient.client.runs.wait(
       thread.thread_id,
       'ingestion_graph',
       {
         input: {
-          docs: allDocs,
+          sources,
         },
         config: {
           configurable: {

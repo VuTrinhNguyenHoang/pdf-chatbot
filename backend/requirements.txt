@@ -3,5 +3,6 @@ langgraph-cli[inmem]
 langchain
 langchain-openai
 langchain-community
+langchain-docling
 supabase
 pydantic

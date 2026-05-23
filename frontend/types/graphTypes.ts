@@ -88,3 +88,14 @@ export interface AgentConfiguration extends BaseConfiguration {
 
 export interface IndexConfiguration extends BaseConfiguration {
 }
+
+export interface IndexSource {
+  filename: string;
+  mimeType: string;
+  contentBase64: string;
+}
+
+export interface IndexState {
+  sources?: IndexSource[];
+  docs?: documentType;
+}

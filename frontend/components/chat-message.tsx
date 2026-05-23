@@ -18,6 +18,44 @@ interface ChatMessageProps {
   };
 }
 
+function getSourceName(source: PDFDocument): string {
+  const metadata = source.metadata as Record<string, any> | undefined;
+  const rawSource = metadata?.source_file || metadata?.filename || metadata?.source;
+
+  if (!rawSource) {
+    return 'N/A';
+  }
+
+  return String(rawSource).split('/').pop() || String(rawSource);
+}
+
+function getPageLabel(source: PDFDocument): string {
+  const metadata = source.metadata as Record<string, any> | undefined;
+  const pageStart = metadata?.page_start ?? metadata?.loc?.pageNumber;
+  const pageEnd = metadata?.page_end;
+
+  if (pageStart == null) {
+    return 'N/A';
+  }
+
+  if (pageEnd && pageEnd !== pageStart) {
+    return `${pageStart}-${pageEnd}`;
+  }
+
+  return `${pageStart}`;
+}
+
+function getSourceTitle(source: PDFDocument): string | undefined {
+  const metadata = source.metadata as Record<string, any> | undefined;
+
+  return (
+    metadata?.table_title ||
+    metadata?.image_title ||
+    metadata?.title ||
+    metadata?.content_type
+  );
+}
+
 export function ChatMessage({ message }: ChatMessageProps) {
   const isUser = message.role === 'user';
   const [copied, setCopied] = useState(false);
@@ -75,23 +113,28 @@ export function ChatMessage({ message }: ChatMessageProps) {
                   </AccordionTrigger>
                   <AccordionContent>
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                      {message.sources?.map((source, index) => (
-                        <Card
-                          key={index}
-                          className="bg-background/50 transition-all duration-200 hover:bg-background hover:shadow-md hover:scale-[1.02] cursor-pointer"
-                        >
-                          <CardContent className="p-3">
-                            <p className="text-sm font-medium truncate">
-                              {source.metadata?.source ||
-                                source.metadata?.filename ||
-                                'N/A'}
-                            </p>
-                            <p className="text-sm text-muted-foreground">
-                              Page {source.metadata?.loc?.pageNumber || 'N/A'}
-                            </p>
-                          </CardContent>
-                        </Card>
-                      ))}
+                      {message.sources?.map((source, index) => {
+                        const sourceName = getSourceName(source);
+                        const pageLabel = getPageLabel(source);
+                        const sourceTitle = getSourceTitle(source);
+
+                        return (
+                          <Card
+                            key={index}
+                            className="bg-background/50 transition-all duration-200 hover:bg-background hover:shadow-md hover:scale-[1.02] cursor-pointer"
+                          >
+                            <CardContent className="p-3">
+                              <p className="text-sm font-medium truncate">{sourceName}</p>
+                              <p className="text-sm text-muted-foreground">Page {pageLabel}</p>
+                              {sourceTitle && (
+                                <p className="text-xs text-muted-foreground truncate">
+                                  {sourceTitle}
+                                </p>
+                              )}
+                            </CardContent>
+                          </Card>
+                        );
+                      })}
                     </div>
                   </AccordionContent>
                 </AccordionItem>
