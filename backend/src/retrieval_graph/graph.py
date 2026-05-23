@@ -18,7 +18,6 @@ from src.shared.utils import load_chat_model
 
 class RouterDecision(BaseModel):
     route: Literal["retrieve", "direct"]
-    directAnswer: str | None = None
 
 
 def check_query_type(

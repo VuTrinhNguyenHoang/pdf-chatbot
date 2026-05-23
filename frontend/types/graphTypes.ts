@@ -28,6 +28,14 @@ export interface RetrieveDocumentsNodeUpdates {
   };
 }
 
+export interface StreamActivity {
+  route: 'retrieve' | 'direct' | null;
+  completedNodes: string[];
+  activeNode: string | null;
+  isComplete: boolean;
+  error?: string;
+}
+
 export type PDFDocument = Document & {
   metadata?: {
     loc?: {

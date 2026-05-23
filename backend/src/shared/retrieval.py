@@ -10,6 +10,53 @@ from src.shared.configuration import BaseConfiguration, ensure_base_configuratio
 
 DEFAULT_EMBEDDING_MODEL = "text-embedding-3-small"
 
+PUBLIC_METADATA_KEYS = (
+    "uuid",
+    "source",
+    "filename",
+    "source_file",
+    "content_type",
+    "page_start",
+    "page_end",
+    "title",
+    "table_title",
+    "image_title",
+    "chunk_index",
+    "parser",
+    "loc",
+)
+
+def public_metadata(metadata: dict) -> dict:
+    return {
+        key: metadata[key]
+        for key in PUBLIC_METADATA_KEYS
+        if metadata.get(key) is not None
+    }
+
+def document_key(document: Document) -> tuple:
+    metadata = document.metadata or {}
+
+    if metadata.get("uuid"):
+        return ("uuid", metadata["uuid"])
+
+    if metadata.get("source_file") is not None and metadata.get("chunk_index") is not None:
+        return ("chunk", metadata.get("source_file"), metadata.get("chunk_index"))
+
+    return ("content", document.page_content)
+
+def deduplicate_documents(documents: list[Document]) -> list[Document]:
+    selected: list[Document] = []
+    seen_keys: set[tuple] = set()
+
+    for document in documents:
+        key = document_key(document)
+        if key in seen_keys:
+            continue
+
+        selected.append(document)
+        seen_keys.add(key)
+
+    return selected
 
 @dataclass
 class VectorStoreRetrieverHandle:
@@ -32,14 +79,16 @@ class VectorStoreRetrieverHandle:
         )
         response = query_builder.limit(self.k).execute()
 
-        return [
+        documents = [
             Document(
-                metadata=match.get("metadata", {}),
+                metadata=public_metadata(match.get("metadata", {})),
                 page_content=match.get("content", ""),
             )
             for match in response.data
             if match.get("content")
         ]
+
+        return deduplicate_documents(documents)
 
 
 def load_embeddings() -> OpenAIEmbeddings:

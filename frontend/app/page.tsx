@@ -16,18 +16,135 @@ import {
   documentType,
   PDFDocument,
   RetrieveDocumentsNodeUpdates,
+  StreamActivity,
 } from '@/types/graphTypes';
 import { Card, CardContent } from '@/components/ui/card';
 
+type ChatMessageItem = {
+  role: 'user' | 'assistant';
+  content: string;
+  sources?: PDFDocument[];
+  activity?: StreamActivity;
+};
+
+const GRAPH_NODES = new Set([
+  'checkQueryType',
+  'retrieveDocuments',
+  'generateResponse',
+  'directAnswer',
+]);
+
+function createInitialActivity(): StreamActivity {
+  return {
+    route: null,
+    completedNodes: ['START'],
+    activeNode: 'checkQueryType',
+    isComplete: false,
+  };
+}
+
+function markActivityNodeComplete(
+  activity: StreamActivity,
+  nodeName: string,
+  nodeData: unknown,
+): StreamActivity {
+  if (!GRAPH_NODES.has(nodeName)) {
+    return activity;
+  }
+
+  const completedNodes = new Set(activity.completedNodes);
+  completedNodes.add('START');
+  completedNodes.add(nodeName);
+
+  let route = activity.route;
+  let activeNode = activity.activeNode;
+  let isComplete = activity.isComplete;
+
+  if (
+    nodeName === 'checkQueryType' &&
+    nodeData &&
+    typeof nodeData === 'object' &&
+    'route' in nodeData
+  ) {
+    const nextRoute = (nodeData as { route?: unknown }).route;
+    route =
+      nextRoute === 'retrieve' || nextRoute === 'direct' ? nextRoute : route;
+    activeNode =
+      route === 'retrieve'
+        ? 'retrieveDocuments'
+        : route === 'direct'
+          ? 'directAnswer'
+          : 'unknown';
+  } else if (nodeName === 'retrieveDocuments') {
+    route = 'retrieve';
+    activeNode = 'generateResponse';
+  } else if (nodeName === 'generateResponse' || nodeName === 'directAnswer') {
+    completedNodes.add('END');
+    activeNode = null;
+    isComplete = true;
+  }
+
+  return {
+    ...activity,
+    route,
+    completedNodes: Array.from(completedNodes),
+    activeNode,
+    isComplete,
+  };
+}
+
+function markActivityStreaming(activity: StreamActivity): StreamActivity {
+  if (activity.isComplete) {
+    return activity;
+  }
+
+  if (activity.route === 'retrieve') {
+    return { ...activity, activeNode: 'generateResponse' };
+  }
+
+  if (activity.route === 'direct') {
+    return { ...activity, activeNode: 'directAnswer' };
+  }
+
+  return activity;
+}
+
+function completeActivity(activity: StreamActivity): StreamActivity {
+  if (activity.isComplete) {
+    return activity;
+  }
+
+  const completedNodes = new Set(activity.completedNodes);
+  completedNodes.add('START');
+
+  if (activity.route === 'retrieve') {
+    completedNodes.add('generateResponse');
+  } else if (activity.route === 'direct') {
+    completedNodes.add('directAnswer');
+  }
+
+  completedNodes.add('END');
+
+  return {
+    ...activity,
+    completedNodes: Array.from(completedNodes),
+    activeNode: null,
+    isComplete: true,
+  };
+}
+
+function failActivity(activity: StreamActivity, error: unknown): StreamActivity {
+  return {
+    ...activity,
+    activeNode: activity.activeNode ?? 'unknown',
+    isComplete: true,
+    error: error instanceof Error ? error.message : 'Unknown streaming error',
+  };
+}
+
 export default function Home() {
   const { toast } = useToast(); // Add this hook
-  const [messages, setMessages] = useState<
-    Array<{
-      role: 'user' | 'assistant';
-      content: string;
-      sources?: PDFDocument[];
-    }>
-  >([]);
+  const [messages, setMessages] = useState<ChatMessageItem[]>([]);
   const [input, setInput] = useState('');
   const [files, setFiles] = useState<File[]>([]);
   const [isUploading, setIsUploading] = useState(false);
@@ -37,6 +154,29 @@ export default function Home() {
   const abortControllerRef = useRef<AbortController | null>(null); // Track the AbortController
   const messagesEndRef = useRef<HTMLDivElement>(null); // Add this ref
   const lastRetrievedDocsRef = useRef<PDFDocument[]>([]); // useRef to store the last retrieved documents
+
+  const updateLatestAssistantMessage = (
+    updater: (message: ChatMessageItem) => ChatMessageItem,
+  ) => {
+    setMessages((prev) => {
+      const nextMessages = [...prev];
+      let index = -1;
+
+      for (let i = nextMessages.length - 1; i >= 0; i -= 1) {
+        if (nextMessages[i].role === 'assistant') {
+          index = i;
+          break;
+        }
+      }
+
+      if (index === -1) {
+        return prev;
+      }
+
+      nextMessages[index] = updater(nextMessages[index]);
+      return nextMessages;
+    });
+  };
 
   useEffect(() => {
     // Create a thread when the component mounts
@@ -78,7 +218,12 @@ export default function Home() {
     setMessages((prev) => [
       ...prev,
       { role: 'user', content: userMessage, sources: undefined }, // Clear sources for new user message
-      { role: 'assistant', content: '', sources: undefined }, // Clear sources for new assistant message
+      {
+        role: 'assistant',
+        content: '',
+        sources: undefined,
+        activity: createInitialActivity(),
+      }, // Clear sources for new assistant message
     ]);
     setInput('');
     setIsLoading(true);
@@ -132,6 +277,13 @@ export default function Home() {
           const { event, data } = sseEvent;
 
           if (event === 'messages/partial') {
+            updateLatestAssistantMessage((message) => ({
+              ...message,
+              activity: markActivityStreaming(
+                message.activity ?? createInitialActivity(),
+              ),
+            }));
+
             if (Array.isArray(data)) {
               const lastObj = data[data.length - 1];
               if (lastObj?.type === 'ai') {
@@ -155,6 +307,19 @@ export default function Home() {
               }
             }
           } else if (event === 'updates' && data) {
+            if (data && typeof data === 'object') {
+              for (const [nodeName, nodeData] of Object.entries(data)) {
+                updateLatestAssistantMessage((message) => ({
+                  ...message,
+                  activity: markActivityNodeComplete(
+                    message.activity ?? createInitialActivity(),
+                    nodeName,
+                    nodeData,
+                  ),
+                }));
+              }
+            }
+
             if (
               data &&
               typeof data === 'object' &&
@@ -177,6 +342,11 @@ export default function Home() {
           }
         }
       }
+
+      updateLatestAssistantMessage((message) => ({
+        ...message,
+        activity: completeActivity(message.activity ?? createInitialActivity()),
+      }));
     } catch (error) {
       console.error('Error sending message:', error);
       toast({
@@ -190,6 +360,10 @@ export default function Home() {
         const newArr = [...prev];
         newArr[newArr.length - 1].content =
           'Sorry, there was an error processing your message.';
+        newArr[newArr.length - 1].activity = failActivity(
+          newArr[newArr.length - 1].activity ?? createInitialActivity(),
+          error,
+        );
         return newArr;
       });
     } finally {
