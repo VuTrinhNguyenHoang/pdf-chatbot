@@ -34,15 +34,13 @@ export interface StreamActivity {
   activeNode: string | null;
   isComplete: boolean;
   error?: string;
+  iterationCount?: number;  // number of checkEnough evaluations completed
 }
 
 export type PDFDocument = Document & {
   metadata?: {
     loc?: {
-      lines?: {
-        from: number;
-        to: number;
-      };
+      lines?: { from: number; to: number };
       pageNumber?: number;
     };
     pdf?: {
@@ -56,11 +54,19 @@ export type PDFDocument = Document & {
         IsAcroFormPresent?: boolean;
       };
       version?: string;
-      metadata?: any;
+      metadata?: unknown;
       totalPages?: number;
     };
     uuid?: string;
     source?: string;
+    source_file?: string;
+    filename?: string;
+    content_type?: 'text' | 'table' | 'image';
+    page_start?: number;
+    page_end?: number;
+    title?: string;
+    table_title?: string;
+    image_title?: string;
   };
 };
 

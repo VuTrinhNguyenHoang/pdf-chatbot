@@ -25,6 +25,7 @@ const ACTIVITY_PATHS = {
     'START',
     'checkQueryType',
     'retrieveDocuments',
+    'checkEnough',
     'generateResponse',
     'END',
   ],
@@ -36,6 +37,7 @@ const ACTIVITY_LABELS: Record<string, string> = {
   START: 'START',
   checkQueryType: 'checkQueryType',
   retrieveDocuments: 'retrieveDocuments',
+  checkEnough: 'checkEnough',
   generateResponse: 'generateResponse',
   directAnswer: 'directAnswer',
   '...': '...',
@@ -116,16 +118,15 @@ function getActivityStepStatus(
 }
 
 function getActivitySummary(activity: StreamActivity): string {
-  if (activity.error) {
-    return 'Error';
-  }
-
-  if (activity.isComplete) {
-    return 'Complete';
-  }
+  if (activity.error) return 'Error';
+  if (activity.isComplete) return 'Complete';
 
   if (activity.activeNode) {
-    return ACTIVITY_LABELS[activity.activeNode] ?? activity.activeNode;
+    const label = ACTIVITY_LABELS[activity.activeNode] ?? activity.activeNode;
+    if (activity.iterationCount && activity.iterationCount > 1) {
+      return `${label} (attempt ${activity.iterationCount}/3)`;
+    }
+    return label;
   }
 
   return 'Pending';
