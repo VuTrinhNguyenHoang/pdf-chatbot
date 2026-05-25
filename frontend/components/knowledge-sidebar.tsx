@@ -185,7 +185,10 @@ function ImagesList({ images }: { images: ContentEntry[] }) {
             <p className="text-xs font-medium truncate group-hover:text-foreground">
               {img.title || img.filename}
             </p>
-            <p className="text-[10px] text-muted-foreground">p.{img.page ?? '?'}</p>
+            <p className="text-[10px] text-muted-foreground">
+              p.{img.page ?? '?'}
+              {img.imageStatus && img.imageStatus !== 'extracted' ? ' · no preview' : ''}
+            </p>
           </button>
         ))}
       </div>
@@ -199,7 +202,20 @@ function ImagesList({ images }: { images: ContentEntry[] }) {
             </DialogDescription>
           </DialogHeader>
           <DialogBody>
-            <p className="text-sm leading-relaxed text-muted-foreground">
+            {selected?.imageUrl ? (
+              <div className="overflow-hidden rounded-md border bg-white">
+                <img
+                  src={selected.imageUrl}
+                  alt={selected.title || selected.filename}
+                  className="max-h-[60vh] w-full object-contain"
+                />
+              </div>
+            ) : (
+              <div className="rounded-md border bg-muted/40 p-4 text-sm text-muted-foreground">
+                Image preview unavailable.
+              </div>
+            )}
+            <p className="mt-3 text-sm leading-relaxed text-muted-foreground">
               {selected?.content || 'No description available.'}
             </p>
           </DialogBody>

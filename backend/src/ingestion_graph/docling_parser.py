@@ -3,19 +3,25 @@ import hashlib
 import io
 import os
 import tempfile
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
 from docling.chunking import DocChunk, HybridChunker
-from docling.datamodel.base_models import DocItemLabel
+from docling.datamodel.base_models import DocItemLabel, InputFormat
 from docling.datamodel.document import PictureItem, TableItem
-from docling.document_converter import DocumentConverter
+from docling.datamodel.pipeline_options import PdfPipelineOptions
+from docling.document_converter import DocumentConverter, PdfFormatOption
 from langchain_core.documents import Document
 from openai import OpenAI
+from PIL import Image
 
 from src.ingestion_graph.state import IndexSource
 
 VISION_MODEL = "gpt-4o-mini"
+DEFAULT_IMAGE_SCALE = 2.0
+DEFAULT_IMAGE_MAX_EDGE = 1400
+DEFAULT_MAX_IMAGE_PREVIEW_BYTES = 1_500_000
 DEFAULT_MAX_IMAGE_DESCRIPTIONS_PER_FILE = 20
 VISION_PROMPT = (
     "Describe this image concisely (2-4 sentences). Include: what the image shows, "
@@ -24,8 +30,15 @@ VISION_PROMPT = (
 )
 
 
+@dataclass(frozen=True)
+class ImagePreview:
+    data: bytes | None
+    mime_type: str | None
+    status: str
+
+
 def parse_sources_with_docling(sources: list[IndexSource]) -> list[Document]:
-    converter = DocumentConverter()
+    converter = _make_document_converter()
     chunker = HybridChunker(repeat_table_header=True)
     vision = OpenAI() if _image_descriptions_enabled() else None
     image_cache: dict[str, str] = {}
@@ -38,8 +51,10 @@ def parse_sources_with_docling(sources: list[IndexSource]) -> list[Document]:
             dl_doc = result.document
             chunks = list(chunker.chunk(dl_doc))
             seen_tables: set[str] = set()
+            seen_pictures: set[str] = set()
             image_budget = {"remaining": _max_image_descriptions_per_file()}
             for idx, chunk in enumerate(chunks):
+                doc_items = list(chunk.meta.doc_items or [])
                 doc = _chunk_to_document(
                     chunk,
                     idx,
@@ -52,17 +67,52 @@ def parse_sources_with_docling(sources: list[IndexSource]) -> list[Document]:
                 )
                 if doc is not None:
                     all_docs.append(doc)
+                    if doc.metadata.get("content_type") == "image":
+                        seen_pictures.update(_picture_refs(doc_items))
+
+            for picture_idx, picture in enumerate(getattr(dl_doc, "pictures", [])):
+                if _picture_ref(picture) in seen_pictures:
+                    continue
+                all_docs.append(
+                    _picture_to_document(
+                        picture,
+                        len(chunks) + picture_idx,
+                        source["filename"],
+                        dl_doc,
+                        vision,
+                        image_cache,
+                        image_budget,
+                    )
+                )
 
     return all_docs
 
 
 # ── helpers ──────────────────────────────────────────────────────────────────
 
+def _make_document_converter() -> DocumentConverter:
+    options = PdfPipelineOptions()
+    options.generate_picture_images = True
+    options.images_scale = _image_scale()
+    return DocumentConverter(
+        format_options={InputFormat.PDF: PdfFormatOption(pipeline_options=options)},
+    )
+
+
 def _write_source(source: IndexSource, tmp_dir: Path) -> Path:
     filename = Path(source["filename"]).name
     path = tmp_dir / filename
     path.write_bytes(base64.b64decode(source["contentBase64"]))
     return path
+
+
+def _picture_refs(doc_items) -> set[str]:
+    return {_picture_ref(item) for item in doc_items if isinstance(item, PictureItem)}
+
+
+def _picture_ref(item: PictureItem) -> str:
+    ref = getattr(item, "self_ref", None)
+    return str(ref) if ref else str(id(item))
 
 
 def _chunk_to_document(
@@ -83,10 +133,13 @@ def _chunk_to_document(
     bboxes = _extract_bboxes(doc_items)
     source_file = Path(filename).name
 
+    image_preview = (
+        _extract_image_preview(doc_items, dl_doc) if content_type == "image" else None
+    )
+
     if content_type == "image":
         page_content = _describe_image(
-            doc_items,
-            dl_doc,
+            image_preview,
             vision,
             chunk.text,
             image_cache,
@@ -116,9 +169,51 @@ def _chunk_to_document(
         "title_confidence": "docling" if title else "missing",
         "table_title": title if content_type == "table" else None,
         "image_title": title if content_type == "image" else None,
+        "image_data_url": _image_data_url(image_preview),
+        "image_mime_type": image_preview.mime_type if image_preview else None,
+        "image_extraction_status": image_preview.status if image_preview else None,
         "docling_labels": sorted(l.value for l in labels),
     }
     return Document(page_content=page_content, metadata=metadata)
+
+
+def _picture_to_document(
+    picture: PictureItem,
+    index: int,
+    filename: str,
+    dl_doc,
+    vision: OpenAI | None,
+    image_cache: dict[str, str],
+    image_budget: dict[str, int],
+) -> Document:
+    source_file = Path(filename).name
+    image_preview = _extract_image_preview([picture], dl_doc)
+    page_content = _describe_image(image_preview, vision, "", image_cache, image_budget)
+    pages = _extract_pages([picture])
+
+    return Document(
+        page_content=page_content,
+        metadata={
+            "uuid": _stable_id(source_file, index, page_content),
+            "parser": "docling",
+            "source": source_file,
+            "filename": source_file,
+            "source_file": source_file,
+            "chunk_index": index,
+            "content_type": "image",
+            "page_start": min(pages) if pages else None,
+            "page_end": max(pages) if pages else None,
+            "bbox": _extract_bboxes([picture])[:5],
+            "title": None,
+            "title_confidence": "missing",
+            "table_title": None,
+            "image_title": None,
+            "image_data_url": _image_data_url(image_preview),
+            "image_mime_type": image_preview.mime_type,
+            "image_extraction_status": image_preview.status,
+            "docling_labels": [DocItemLabel.PICTURE.value],
+        },
+    )
 
 
 def _extract_table_markdown(doc_items, dl_doc, fallback: str) -> str:
@@ -133,17 +228,7 @@ def _extract_table_markdown(doc_items, dl_doc, fallback: str) -> str:
     return fallback or ""
 
 
-def _describe_image(
-    doc_items,
-    dl_doc,
-    vision: OpenAI | None,
-    fallback: str,
-    image_cache: dict[str, str],
-    image_budget: dict[str, int],
-) -> str:
-    if vision is None:
-        return _image_fallback(fallback)
-
+def _extract_image_preview(doc_items, dl_doc) -> ImagePreview:
     for item in doc_items:
         if not isinstance(item, PictureItem):
             continue
@@ -151,36 +236,83 @@ def _describe_image(
             pil_img = item.get_image(dl_doc)
             if pil_img is None:
                 continue
-            buf = io.BytesIO()
-            pil_img.save(buf, format="PNG")
-            image_bytes = buf.getvalue()
-            image_hash = hashlib.sha1(image_bytes).hexdigest()
-
-            if image_hash in image_cache:
-                return image_cache[image_hash]
-            if image_budget["remaining"] <= 0:
-                return _image_fallback(fallback)
-
-            image_budget["remaining"] -= 1
-            b64 = base64.b64encode(image_bytes).decode()
-            resp = vision.chat.completions.create(
-                model=VISION_MODEL,
-                messages=[{
-                    "role": "user",
-                    "content": [
-                        {"type": "text", "text": VISION_PROMPT},
-                        {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{b64}"}},
-                    ],
-                }],
-                max_tokens=300,
-            )
-            description = (resp.choices[0].message.content or "").strip()
-            if description:
-                image_cache[image_hash] = description
-                return description
+            encoded = _encode_image_preview(pil_img)
+            if len(encoded) > _max_image_preview_bytes():
+                return ImagePreview(None, None, "too_large")
+            return ImagePreview(encoded, "image/jpeg", "extracted")
         except Exception:
             pass
+    return ImagePreview(None, None, "missing")
+
+
+def _encode_image_preview(pil_img) -> bytes:
+    image = pil_img.copy()
+    image.thumbnail((_image_max_edge(), _image_max_edge()))
+    if image.mode in {"RGBA", "LA"}:
+        bg = Image.new("RGB", image.size, "white")
+        bg.paste(image, mask=image.getchannel("A"))
+        image = bg
+    elif image.mode != "RGB":
+        image = image.convert("RGB")
+
+    buf = io.BytesIO()
+    image.save(buf, format="JPEG", quality=85, optimize=True)
+    return buf.getvalue()
+
+
+def _describe_image(
+    image_preview: ImagePreview | None,
+    vision: OpenAI | None,
+    fallback: str,
+    image_cache: dict[str, str],
+    image_budget: dict[str, int],
+) -> str:
+    if vision is None or image_preview is None or image_preview.data is None:
+        return _image_fallback(fallback)
+
+    try:
+        image_hash = hashlib.sha1(image_preview.data).hexdigest()
+        if image_hash in image_cache:
+            return image_cache[image_hash]
+        if image_budget["remaining"] <= 0:
+            return _image_fallback(fallback)
+
+        image_budget["remaining"] -= 1
+        b64 = base64.b64encode(image_preview.data).decode()
+        resp = vision.chat.completions.create(
+            model=VISION_MODEL,
+            messages=[{
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": VISION_PROMPT},
+                    {
+                        "type": "image_url",
+                        "image_url": {
+                            "url": f"data:{image_preview.mime_type};base64,{b64}",
+                        },
+                    },
+                ],
+            }],
+            max_tokens=300,
+        )
+        description = (resp.choices[0].message.content or "").strip()
+        if description:
+            image_cache[image_hash] = description
+            return description
+    except Exception:
+        pass
     return _image_fallback(fallback)
+
+
+def _image_data_url(image_preview: ImagePreview | None) -> str | None:
+    if (
+        image_preview is None
+        or image_preview.data is None
+        or image_preview.mime_type is None
+    ):
+        return None
+    b64 = base64.b64encode(image_preview.data).decode()
+    return f"data:{image_preview.mime_type};base64,{b64}"
 
 
 def _image_fallback(fallback: str) -> str:
@@ -190,6 +322,36 @@ def _image_fallback(fallback: str) -> str:
 def _image_descriptions_enabled() -> bool:
     value = os.getenv("ENABLE_IMAGE_DESCRIPTIONS", "true").strip().lower()
     return value not in {"0", "false", "no", "off"}
+
+
+def _image_scale() -> float:
+    value = os.getenv("PDF_IMAGE_SCALE")
+    if not value:
+        return DEFAULT_IMAGE_SCALE
+    try:
+        return max(1.0, float(value))
+    except ValueError:
+        return DEFAULT_IMAGE_SCALE
+
+
+def _image_max_edge() -> int:
+    value = os.getenv("PDF_IMAGE_MAX_EDGE")
+    if not value:
+        return DEFAULT_IMAGE_MAX_EDGE
+    try:
+        return max(320, int(value))
+    except ValueError:
+        return DEFAULT_IMAGE_MAX_EDGE
+
+
+def _max_image_preview_bytes() -> int:
+    value = os.getenv("MAX_IMAGE_PREVIEW_BYTES")
+    if not value:
+        return DEFAULT_MAX_IMAGE_PREVIEW_BYTES
+    try:
+        return max(0, int(value))
+    except ValueError:
+        return DEFAULT_MAX_IMAGE_PREVIEW_BYTES
 
 
 def _max_image_descriptions_per_file() -> int:
