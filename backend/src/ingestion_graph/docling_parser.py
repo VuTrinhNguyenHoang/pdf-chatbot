@@ -1,6 +1,7 @@
 import base64
 import hashlib
 import io
+import os
 import tempfile
 from pathlib import Path
 from typing import Optional
@@ -15,6 +16,7 @@ from openai import OpenAI
 from src.ingestion_graph.state import IndexSource
 
 VISION_MODEL = "gpt-4o-mini"
+DEFAULT_MAX_IMAGE_DESCRIPTIONS_PER_FILE = 20
 VISION_PROMPT = (
     "Describe this image concisely (2-4 sentences). Include: what the image shows, "
     "any visible text, numbers, or labels, and the insight it provides in a document "
@@ -25,7 +27,8 @@ VISION_PROMPT = (
 def parse_sources_with_docling(sources: list[IndexSource]) -> list[Document]:
     converter = DocumentConverter()
     chunker = HybridChunker(repeat_table_header=True)
-    vision = OpenAI()
+    vision = OpenAI() if _image_descriptions_enabled() else None
+    image_cache: dict[str, str] = {}
 
     all_docs: list[Document] = []
     with tempfile.TemporaryDirectory() as tmp_dir:
@@ -35,8 +38,18 @@ def parse_sources_with_docling(sources: list[IndexSource]) -> list[Document]:
             dl_doc = result.document
             chunks = list(chunker.chunk(dl_doc))
             seen_tables: set[str] = set()
+            image_budget = {"remaining": _max_image_descriptions_per_file()}
             for idx, chunk in enumerate(chunks):
-                doc = _chunk_to_document(chunk, idx, source["filename"], dl_doc, vision, seen_tables)
+                doc = _chunk_to_document(
+                    chunk,
+                    idx,
+                    source["filename"],
+                    dl_doc,
+                    vision,
+                    image_cache,
+                    image_budget,
+                    seen_tables,
+                )
                 if doc is not None:
                     all_docs.append(doc)
 
@@ -57,7 +70,9 @@ def _chunk_to_document(
     index: int,
     filename: str,
     dl_doc,
-    vision: OpenAI,
+    vision: OpenAI | None,
+    image_cache: dict[str, str],
+    image_budget: dict[str, int],
     seen_tables: set[str] | None = None,
 ) -> Document | None:
     doc_items = list(chunk.meta.doc_items or [])
@@ -69,7 +84,14 @@ def _chunk_to_document(
     source_file = Path(filename).name
 
     if content_type == "image":
-        page_content = _describe_image(doc_items, dl_doc, vision, chunk.text)
+        page_content = _describe_image(
+            doc_items,
+            dl_doc,
+            vision,
+            chunk.text,
+            image_cache,
+            image_budget,
+        )
     elif content_type == "table":
         page_content = _extract_table_markdown(doc_items, dl_doc, chunk.text)
         if seen_tables is not None:
@@ -111,7 +133,17 @@ def _extract_table_markdown(doc_items, dl_doc, fallback: str) -> str:
     return fallback or ""
 
 
-def _describe_image(doc_items, dl_doc, vision: OpenAI, fallback: str) -> str:
+def _describe_image(
+    doc_items,
+    dl_doc,
+    vision: OpenAI | None,
+    fallback: str,
+    image_cache: dict[str, str],
+    image_budget: dict[str, int],
+) -> str:
+    if vision is None:
+        return _image_fallback(fallback)
+
     for item in doc_items:
         if not isinstance(item, PictureItem):
             continue
@@ -121,8 +153,16 @@ def _describe_image(doc_items, dl_doc, vision: OpenAI, fallback: str) -> str:
                 continue
             buf = io.BytesIO()
             pil_img.save(buf, format="PNG")
-            b64 = base64.b64encode(buf.getvalue()).decode()
+            image_bytes = buf.getvalue()
+            image_hash = hashlib.sha1(image_bytes).hexdigest()
 
+            if image_hash in image_cache:
+                return image_cache[image_hash]
+            if image_budget["remaining"] <= 0:
+                return _image_fallback(fallback)
+
+            image_budget["remaining"] -= 1
+            b64 = base64.b64encode(image_bytes).decode()
             resp = vision.chat.completions.create(
                 model=VISION_MODEL,
                 messages=[{
@@ -136,10 +176,30 @@ def _describe_image(doc_items, dl_doc, vision: OpenAI, fallback: str) -> str:
             )
             description = (resp.choices[0].message.content or "").strip()
             if description:
+                image_cache[image_hash] = description
                 return description
         except Exception:
             pass
-    return fallback or ""
+    return _image_fallback(fallback)
+
+
+def _image_fallback(fallback: str) -> str:
+    return fallback or "Image extracted from the document."
+
+
+def _image_descriptions_enabled() -> bool:
+    value = os.getenv("ENABLE_IMAGE_DESCRIPTIONS", "true").strip().lower()
+    return value not in {"0", "false", "no", "off"}
+
+
+def _max_image_descriptions_per_file() -> int:
+    value = os.getenv("MAX_IMAGE_DESCRIPTIONS_PER_FILE")
+    if not value:
+        return DEFAULT_MAX_IMAGE_DESCRIPTIONS_PER_FILE
+    try:
+        return max(0, int(value))
+    except ValueError:
+        return DEFAULT_MAX_IMAGE_DESCRIPTIONS_PER_FILE
 
 
 def _content_type(labels: set[DocItemLabel]) -> str:
