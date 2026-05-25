@@ -153,5 +153,6 @@ yarn dev
 - Tối đa `5` file mỗi lượt upload
 - Mỗi file tối đa `10MB`
 - Embedding hiện dùng `text-embedding-3-small`, nên Supabase phải là `vector(1536)`
+- Retrieval mặc định lấy `candidateK=12` candidates rồi rerank về `k=5`
 - `langgraph dev` yêu cầu Python `3.11+`
 - Trên Ubuntu, nếu `yarn --version` ra `0.32+git` thì bạn đang dùng `cmdtest`, không phải Yarn thật

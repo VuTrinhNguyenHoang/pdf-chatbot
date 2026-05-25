@@ -7,6 +7,8 @@ export const retrievalAssistantStreamConfig: StreamConfigurables = {
   queryModel: 'openai/gpt-4o-mini',
   retrieverProvider: 'supabase',
   k: 5,
+  candidateK: 12,
+  rerank: true,
 };
 
 /**

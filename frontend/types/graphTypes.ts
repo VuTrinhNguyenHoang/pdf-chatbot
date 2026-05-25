@@ -85,10 +85,22 @@ export interface BaseConfiguration {
   filterKwargs?: Record<string, any>;
 
   /**
-   * The number of documents to retrieve.
+   * The number of documents to return after retrieval.
    * @default 5
    */
   k?: number;
+
+  /**
+   * The number of vector-search candidates to fetch before reranking.
+   * @default 12
+   */
+  candidateK?: number;
+
+  /**
+   * Whether to rerank vector-search candidates before answering.
+   * @default false
+   */
+  rerank?: boolean;
 }
 
 export interface AgentConfiguration extends BaseConfiguration {

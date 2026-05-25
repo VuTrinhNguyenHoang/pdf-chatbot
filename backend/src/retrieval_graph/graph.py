@@ -11,6 +11,7 @@ from src.retrieval_graph.prompts import (
     RESPONSE_SYSTEM_PROMPT,
     ROUTER_SYSTEM_PROMPT,
 )
+from src.retrieval_graph.rerank import rerank_documents
 from src.retrieval_graph.state import AgentState
 from src.retrieval_graph.utils import format_docs
 from src.shared.retrieval import make_retriever
@@ -52,10 +53,27 @@ def route_query(state: AgentState) -> str:
 
 
 def retrieve_documents(state: AgentState, config: RunnableConfig) -> dict:
-    retriever = make_retriever(config)
+    configuration = ensure_agent_configuration(config)
     query = state.get("retrieval_query") or state["query"]
+    candidate_k = configuration["candidateK"] if configuration["rerank"] else configuration["k"]
+    retriever = make_retriever(_with_retrieval_k(config, candidate_k))
     docs = retriever.invoke(query)
+
+    if not configuration["rerank"]:
+        return {"documents": docs[:configuration["k"]]}
+
+    try:
+        model = load_chat_model(configuration["queryModel"])
+        docs = rerank_documents(state["query"], docs, model, configuration["k"])
+    except Exception:
+        docs = docs[:configuration["k"]]
+
     return {"documents": docs}
+
+
+def _with_retrieval_k(config: RunnableConfig, k: int) -> RunnableConfig:
+    configurable = dict((config or {}).get("configurable", {}))
+    return {**(config or {}), "configurable": {**configurable, "k": k}}
 
 
 def check_enough(state: AgentState, config: RunnableConfig) -> dict:
