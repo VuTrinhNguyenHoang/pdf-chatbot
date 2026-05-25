@@ -1,5 +1,5 @@
 import { createClient } from '@supabase/supabase-js';
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -31,15 +31,28 @@ export interface ContentResponse {
   images: ContentEntry[];
 }
 
-export async function GET(): Promise<NextResponse<ContentResponse | { error: string }>> {
+export interface DeleteContentResponse {
+  deleted: number;
+}
+
+function createSupabaseClient() {
   const url = process.env.SUPABASE_URL;
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
   if (!url || !key) {
+    return null;
+  }
+
+  return createClient(url, key);
+}
+
+export async function GET(): Promise<NextResponse<ContentResponse | { error: string }>> {
+  const supabase = createSupabaseClient();
+
+  if (!supabase) {
     return NextResponse.json({ error: 'Supabase not configured' }, { status: 500 });
   }
 
-  const supabase = createClient(url, key);
   const { data: rows, error } = await supabase
     .from('documents')
     .select('id, content, metadata');
@@ -85,4 +98,50 @@ export async function GET(): Promise<NextResponse<ContentResponse | { error: str
     { files: Array.from(filesMap.values()), tables, images },
     { headers: { 'Cache-Control': 'no-store' } },
   );
+}
+
+export async function DELETE(
+  request: NextRequest,
+): Promise<NextResponse<DeleteContentResponse | { error: string }>> {
+  const supabase = createSupabaseClient();
+
+  if (!supabase) {
+    return NextResponse.json({ error: 'Supabase not configured' }, { status: 500 });
+  }
+
+  const { filename } = await request.json();
+
+  if (!filename || typeof filename !== 'string') {
+    return NextResponse.json({ error: 'Filename is required' }, { status: 400 });
+  }
+
+  const { data: rows, error: selectError } = await supabase
+    .from('documents')
+    .select('id, metadata');
+
+  if (selectError) {
+    return NextResponse.json({ error: selectError.message }, { status: 500 });
+  }
+
+  const ids = ((rows as Pick<SupabaseRow, 'id' | 'metadata'>[]) ?? [])
+    .filter((row) => {
+      const meta = row.metadata || {};
+      return meta.source_file === filename || meta.filename === filename;
+    })
+    .map((row) => row.id);
+
+  if (!ids.length) {
+    return NextResponse.json({ deleted: 0 });
+  }
+
+  const { error: deleteError } = await supabase
+    .from('documents')
+    .delete()
+    .in('id', ids);
+
+  if (deleteError) {
+    return NextResponse.json({ error: deleteError.message }, { status: 500 });
+  }
+
+  return NextResponse.json({ deleted: ids.length });
 }

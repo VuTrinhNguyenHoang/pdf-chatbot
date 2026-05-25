@@ -344,7 +344,12 @@ export default function Home() {
     <div className="flex h-screen overflow-hidden">
       {/* Left sidebar ─ 2/10 */}
       <aside className="w-56 min-w-[200px] shrink-0">
-        <KnowledgeSidebar refreshTrigger={sidebarRefresh} />
+        <KnowledgeSidebar
+          refreshTrigger={sidebarRefresh}
+          onDocumentDeleted={(filename) => {
+            setFiles((prev) => prev.filter((file) => file.name !== filename));
+          }}
+        />
       </aside>
 
       {/* Right panel ─ 8/10: original layout preserved exactly */}
