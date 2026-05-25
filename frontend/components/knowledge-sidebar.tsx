@@ -1,8 +1,10 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import { FileText, Table2, Image, RefreshCw } from 'lucide-react';
+import type { ElementType } from 'react';
+import { FileText, Table2, Image, RefreshCw, Trash2, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { useToast } from '@/hooks/use-toast';
 import {
   Dialog,
   DialogContent,
@@ -12,11 +14,16 @@ import {
   DialogDescription,
 } from '@/components/ui/dialog';
 import { cn } from '@/lib/utils';
-import type { ContentEntry, ContentResponse, FileEntry } from '@/app/api/content/route';
+import type {
+  ContentEntry,
+  ContentResponse,
+  DeleteContentResponse,
+  FileEntry,
+} from '@/app/api/content/route';
 
 type Tab = 'files' | 'tables' | 'images';
 
-const TABS: { id: Tab; label: string; icon: React.ElementType }[] = [
+const TABS: { id: Tab; label: string; icon: ElementType }[] = [
   { id: 'files', label: 'Files', icon: FileText },
   { id: 'tables', label: 'Tables', icon: Table2 },
   { id: 'images', label: 'Images', icon: Image },
@@ -24,18 +31,45 @@ const TABS: { id: Tab; label: string; icon: React.ElementType }[] = [
 
 // ── File list ──────────────────────────────────────────────────────────────
 
-function FilesList({ files }: { files: FileEntry[] }) {
+function FilesList({
+  files,
+  deletingFilename,
+  onDeleteClick,
+}: {
+  files: FileEntry[];
+  deletingFilename: string | null;
+  onDeleteClick: (file: FileEntry) => void;
+}) {
   if (!files.length) {
     return <Empty text="No files ingested yet" />;
   }
   return (
     <div className="space-y-1">
       {files.map((f) => (
-        <div key={f.filename} className="px-2 py-1.5 rounded-md hover:bg-muted cursor-default">
-          <p className="text-xs font-medium truncate" title={f.filename}>{f.filename}</p>
-          <p className="text-[10px] text-muted-foreground">
-            {f.chunks} chunks · {f.tables} tables · {f.images} images
-          </p>
+        <div
+          key={f.filename}
+          className="group flex items-center gap-2 rounded-md px-2 py-1.5 hover:bg-muted"
+        >
+          <div className="min-w-0 flex-1 cursor-default">
+            <p className="text-xs font-medium truncate" title={f.filename}>{f.filename}</p>
+            <p className="text-[10px] text-muted-foreground">
+              {f.chunks} chunks · {f.tables} tables · {f.images} images
+            </p>
+          </div>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-7 w-7 shrink-0 text-muted-foreground hover:text-destructive"
+            onClick={() => onDeleteClick(f)}
+            disabled={deletingFilename === f.filename}
+            title={`Delete ${f.filename}`}
+          >
+            {deletingFilename === f.filename ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <Trash2 className="h-3.5 w-3.5" />
+            )}
+          </Button>
         </div>
       ))}
     </div>
@@ -185,12 +219,16 @@ function Empty({ text }: { text: string }) {
 
 interface KnowledgeSidebarProps {
   refreshTrigger?: number;
+  onDocumentDeleted?: (filename: string) => void;
 }
 
-export function KnowledgeSidebar({ refreshTrigger }: KnowledgeSidebarProps) {
+export function KnowledgeSidebar({ refreshTrigger, onDocumentDeleted }: KnowledgeSidebarProps) {
+  const { toast } = useToast();
   const [activeTab, setActiveTab] = useState<Tab>('files');
   const [data, setData] = useState<ContentResponse>({ files: [], tables: [], images: [] });
   const [loading, setLoading] = useState(false);
+  const [deletingFilename, setDeletingFilename] = useState<string | null>(null);
+  const [fileToDelete, setFileToDelete] = useState<FileEntry | null>(null);
 
   const fetchContent = useCallback(async () => {
     setLoading(true);
@@ -203,6 +241,40 @@ export function KnowledgeSidebar({ refreshTrigger }: KnowledgeSidebarProps) {
   }, []);
 
   useEffect(() => { fetchContent(); }, [fetchContent, refreshTrigger]);
+
+  const deleteFile = async () => {
+    if (!fileToDelete) return;
+
+    setDeletingFilename(fileToDelete.filename);
+    try {
+      const res = await fetch('/api/content', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ filename: fileToDelete.filename }),
+      });
+      const payload = await res.json() as DeleteContentResponse | { error: string };
+
+      if (!res.ok) {
+        throw new Error('error' in payload ? payload.error : 'Failed to delete file');
+      }
+
+      onDocumentDeleted?.(fileToDelete.filename);
+      setFileToDelete(null);
+      await fetchContent();
+      toast({
+        title: 'File deleted',
+        description: `${fileToDelete.filename} was removed from the knowledge base`,
+      });
+    } catch (error) {
+      toast({
+        title: 'Delete failed',
+        description: error instanceof Error ? error.message : 'Failed to delete file',
+        variant: 'destructive',
+      });
+    } finally {
+      setDeletingFilename(null);
+    }
+  };
 
   const counts: Record<Tab, number> = {
     files: data.files.length,
@@ -248,10 +320,47 @@ export function KnowledgeSidebar({ refreshTrigger }: KnowledgeSidebarProps) {
       </nav>
 
       <div className="flex-1 overflow-y-auto p-2">
-        {activeTab === 'files' && <FilesList files={data.files} />}
+        {activeTab === 'files' && (
+          <FilesList
+            files={data.files}
+            deletingFilename={deletingFilename}
+            onDeleteClick={setFileToDelete}
+          />
+        )}
         {activeTab === 'tables' && <TablesList tables={data.tables} />}
         {activeTab === 'images' && <ImagesList images={data.images} />}
       </div>
+
+      <Dialog open={!!fileToDelete} onOpenChange={(open) => !open && setFileToDelete(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Delete document</DialogTitle>
+            <DialogDescription>{fileToDelete?.filename}</DialogDescription>
+          </DialogHeader>
+          <DialogBody>
+            <p className="text-sm text-muted-foreground">
+              This removes all chunks, tables, images, and embeddings for this file from Supabase.
+            </p>
+            <div className="mt-5 flex justify-end gap-2">
+              <Button
+                variant="ghost"
+                onClick={() => setFileToDelete(null)}
+                disabled={!!deletingFilename}
+              >
+                Cancel
+              </Button>
+              <Button
+                variant="destructive"
+                onClick={deleteFile}
+                disabled={!!deletingFilename}
+              >
+                {deletingFilename ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+                Delete
+              </Button>
+            </div>
+          </DialogBody>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
