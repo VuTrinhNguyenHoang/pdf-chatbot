@@ -43,6 +43,8 @@ cp frontend/.env.example frontend/.env
 OPENAI_API_KEY=your-openai-api-key
 SUPABASE_URL=https://your-project-ref.supabase.co
 SUPABASE_SERVICE_ROLE_KEY=your-supabase-service-role-key
+ENABLE_IMAGE_DESCRIPTIONS=true
+MAX_IMAGE_DESCRIPTIONS_PER_FILE=20
 
 LANGCHAIN_TRACING_V2=true
 LANGCHAIN_API_KEY=your-langsmith-api-key
@@ -153,5 +155,7 @@ yarn dev
 - Tối đa `5` file mỗi lượt upload
 - Mỗi file tối đa `10MB`
 - Embedding hiện dùng `text-embedding-3-small`, nên Supabase phải là `vector(1536)`
+- `ENABLE_IMAGE_DESCRIPTIONS=false` sẽ bỏ qua gọi vision model khi ingest hình ảnh
+- `MAX_IMAGE_DESCRIPTIONS_PER_FILE` giới hạn số ảnh được mô tả bằng vision model cho mỗi file
 - `langgraph dev` yêu cầu Python `3.11+`
 - Trên Ubuntu, nếu `yarn --version` ra `0.32+git` thì bạn đang dùng `cmdtest`, không phải Yarn thật
