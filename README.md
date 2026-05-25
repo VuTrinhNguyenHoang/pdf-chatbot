@@ -159,3 +159,4 @@ yarn dev
 - `MAX_IMAGE_DESCRIPTIONS_PER_FILE` giới hạn số ảnh được mô tả bằng vision model cho mỗi file
 - `langgraph dev` yêu cầu Python `3.11+`
 - Trên Ubuntu, nếu `yarn --version` ra `0.32+git` thì bạn đang dùng `cmdtest`, không phải Yarn thật
+- Frontend chat config lấy `candidateK=12` candidates rồi rerank về `k=5`
