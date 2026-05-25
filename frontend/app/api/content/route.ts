@@ -7,10 +7,11 @@ export const dynamic = 'force-dynamic';
 interface SupabaseRow {
   id: string;
   content: string;
-  metadata: Record<string, unknown>;
+  metadata: Record<string, unknown> | null;
 }
 
 const CONTENT_PAGE_SIZE = 500;
+const DELETE_BATCH_SIZE = 100;
 
 export interface ContentEntry {
   id: string;
@@ -125,6 +126,55 @@ export async function GET(): Promise<NextResponse<ContentResponse | { error: str
   );
 }
 
+
+async function findDocumentIdsByFilename(
+  supabase: SupabaseClient,
+  filename: string,
+): Promise<string[]> {
+  const ids: string[] = [];
+
+  for (let from = 0; ; from += CONTENT_PAGE_SIZE) {
+    const { data, error } = await supabase
+      .from('documents')
+      .select('id, metadata')
+      .order('id', { ascending: true })
+      .range(from, from + CONTENT_PAGE_SIZE - 1);
+
+    if (error) throw new Error(error.message);
+
+    const rows = (data as Pick<SupabaseRow, 'id' | 'metadata'>[]) ?? [];
+    ids.push(
+      ...rows
+        .filter((row) => {
+          const metadata = row.metadata || {};
+          return metadata.source_file === filename || metadata.filename === filename;
+        })
+        .map((row) => row.id),
+    );
+
+    if (rows.length < CONTENT_PAGE_SIZE) break;
+  }
+
+  return ids;
+}
+
+async function deleteDocumentIds(
+  supabase: SupabaseClient,
+  ids: string[],
+): Promise<number> {
+  let deleted = 0;
+
+  for (let index = 0; index < ids.length; index += DELETE_BATCH_SIZE) {
+    const batch = ids.slice(index, index + DELETE_BATCH_SIZE);
+    const { error } = await supabase.from('documents').delete().in('id', batch);
+
+    if (error) throw new Error(error.message);
+    deleted += batch.length;
+  }
+
+  return deleted;
+}
+
 export async function DELETE(
   request: NextRequest,
 ): Promise<NextResponse<DeleteContentResponse | { error: string }>> {
@@ -140,33 +190,19 @@ export async function DELETE(
     return NextResponse.json({ error: 'Filename is required' }, { status: 400 });
   }
 
-  const { data: rows, error: selectError } = await supabase
-    .from('documents')
-    .select('id, metadata');
+  try {
+    const ids = await findDocumentIdsByFilename(supabase, filename);
 
-  if (selectError) {
-    return NextResponse.json({ error: selectError.message }, { status: 500 });
+    if (!ids.length) {
+      return NextResponse.json({ deleted: 0 });
+    }
+
+    const deleted = await deleteDocumentIds(supabase, ids);
+    return NextResponse.json({ deleted });
+  } catch (error) {
+    return NextResponse.json(
+      { error: error instanceof Error ? error.message : 'Failed to delete file' },
+      { status: 500 },
+    );
   }
-
-  const ids = ((rows as Pick<SupabaseRow, 'id' | 'metadata'>[]) ?? [])
-    .filter((row) => {
-      const meta = row.metadata || {};
-      return meta.source_file === filename || meta.filename === filename;
-    })
-    .map((row) => row.id);
-
-  if (!ids.length) {
-    return NextResponse.json({ deleted: 0 });
-  }
-
-  const { error: deleteError } = await supabase
-    .from('documents')
-    .delete()
-    .in('id', ids);
-
-  if (deleteError) {
-    return NextResponse.json({ error: deleteError.message }, { status: 500 });
-  }
-
-  return NextResponse.json({ deleted: ids.length });
 }
