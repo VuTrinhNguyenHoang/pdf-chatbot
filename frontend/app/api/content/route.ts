@@ -1,4 +1,4 @@
-import { createClient } from '@supabase/supabase-js';
+import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import { NextRequest, NextResponse } from 'next/server';
 
 export const runtime = 'nodejs';
@@ -9,6 +9,8 @@ interface SupabaseRow {
   content: string;
   metadata: Record<string, unknown>;
 }
+
+const CONTENT_PAGE_SIZE = 500;
 
 export interface ContentEntry {
   id: string;
@@ -35,7 +37,7 @@ export interface DeleteContentResponse {
   deleted: number;
 }
 
-function createSupabaseClient() {
+function createSupabaseClient(): SupabaseClient | null {
   const url = process.env.SUPABASE_URL;
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
@@ -46,6 +48,26 @@ function createSupabaseClient() {
   return createClient(url, key);
 }
 
+
+async function fetchContentRows(supabase: SupabaseClient): Promise<SupabaseRow[]> {
+  const rows: SupabaseRow[] = [];
+
+  for (let from = 0; ; from += CONTENT_PAGE_SIZE) {
+    const { data, error } = await supabase
+      .from('documents')
+      .select('id, content, metadata')
+      .order('id', { ascending: true })
+      .range(from, from + CONTENT_PAGE_SIZE - 1);
+
+    if (error) throw new Error(error.message);
+
+    rows.push(...((data as SupabaseRow[]) ?? []));
+    if (!data || data.length < CONTENT_PAGE_SIZE) break;
+  }
+
+  return rows;
+}
+
 export async function GET(): Promise<NextResponse<ContentResponse | { error: string }>> {
   const supabase = createSupabaseClient();
 
@@ -53,19 +75,22 @@ export async function GET(): Promise<NextResponse<ContentResponse | { error: str
     return NextResponse.json({ error: 'Supabase not configured' }, { status: 500 });
   }
 
-  const { data: rows, error } = await supabase
-    .from('documents')
-    .select('id, content, metadata');
+  let rows: SupabaseRow[];
 
-  if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+  try {
+    rows = await fetchContentRows(supabase);
+  } catch (error) {
+    return NextResponse.json(
+      { error: error instanceof Error ? error.message : 'Failed to load content' },
+      { status: 500 },
+    );
   }
 
   const filesMap = new Map<string, FileEntry>();
   const tables: ContentEntry[] = [];
   const images: ContentEntry[] = [];
 
-  for (const row of (rows as SupabaseRow[]) ?? []) {
+  for (const row of rows) {
     const meta = row.metadata || {};
     const filename = String(meta.source_file || meta.filename || 'Unknown');
     const contentType = String(meta.content_type || 'text');
