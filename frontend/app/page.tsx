@@ -9,7 +9,7 @@ import { Input } from '@/components/ui/input';
 import { Paperclip, ArrowUp, Loader2 } from 'lucide-react';
 import { ExamplePrompts } from '@/components/example-prompts';
 import { ChatMessage } from '@/components/chat-message';
-import { FilePreview } from '@/components/file-preview';
+import { FilePreview, type FileUploadStatus } from '@/components/file-preview';
 import { KnowledgeSidebar } from '@/components/knowledge-sidebar';
 import { client } from '@/lib/langgraph-client';
 import { PDFDocument, StreamActivity } from '@/types/graphTypes';
@@ -20,6 +20,25 @@ type ChatMessageItem = {
   sources?: PDFDocument[];
   activity?: StreamActivity;
 };
+
+type UploadFileItem = {
+  id: string;
+  file: File;
+  status: FileUploadStatus;
+  error?: string;
+};
+
+function createUploadItem(file: File, index: number): UploadFileItem {
+  return {
+    id: `${file.name}-${file.size}-${file.lastModified}-${Date.now()}-${index}`,
+    file,
+    status: 'queued',
+  };
+}
+
+function isIngesting(status: FileUploadStatus) {
+  return status === 'uploading' || status === 'ingesting';
+}
 
 const GRAPH_NODES = new Set([
   'checkQueryType',
@@ -119,7 +138,7 @@ export default function Home() {
   const { toast } = useToast();
   const [messages, setMessages] = useState<ChatMessageItem[]>([]);
   const [input, setInput] = useState('');
-  const [files, setFiles] = useState<File[]>([]);
+  const [files, setFiles] = useState<UploadFileItem[]>([]);
   const [isUploading, setIsUploading] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [threadId, setThreadId] = useState<string | null>(null);
@@ -302,32 +321,58 @@ export default function Home() {
       return;
     }
 
-    setIsUploading(true);
-    try {
-      const formData = new FormData();
-      selectedFiles.forEach((file) => formData.append('files', file));
+    if (selectedFiles.length > 5) {
+      toast({ title: 'Too many files', description: 'Please upload at most 5 files at a time', variant: 'destructive' });
+      return;
+    }
 
-      const response = await fetch('/api/ingest', { method: 'POST', body: formData });
-      if (!response.ok) {
-        const data = await response.json();
-        throw new Error(data.error || 'Failed to upload files');
+    const uploadItems = selectedFiles.map(createUploadItem);
+    setFiles((prev) => [...prev, ...uploadItems]);
+    setIsUploading(true);
+
+    let successCount = 0;
+    let failedCount = 0;
+
+    try {
+      for (const item of uploadItems) {
+        setFiles((prev) => prev.map((f) => (
+          f.id === item.id ? { ...f, status: 'uploading', error: undefined } : f
+        )));
+
+        const formData = new FormData();
+        formData.append('files', item.file);
+
+        const request = fetch('/api/ingest', { method: 'POST', body: formData });
+        setFiles((prev) => prev.map((f) => (
+          f.id === item.id ? { ...f, status: 'ingesting' } : f
+        )));
+
+        try {
+          const response = await request;
+          if (!response.ok) {
+            const data = await response.json();
+            throw new Error(data.error || 'Failed to upload file');
+          }
+
+          successCount++;
+          setFiles((prev) => prev.map((f) => (
+            f.id === item.id ? { ...f, status: 'done' } : f
+          )));
+          setSidebarRefresh((n) => n + 1);
+        } catch (error) {
+          failedCount++;
+          setFiles((prev) => prev.map((f) => (
+            f.id === item.id
+              ? { ...f, status: 'error', error: error instanceof Error ? error.message : 'Upload failed' }
+              : f
+          )));
+        }
       }
 
-      setFiles((prev) => [...prev, ...selectedFiles]);
-      setSidebarRefresh((n) => n + 1);
       toast({
-        title: 'Success',
-        description: `${selectedFiles.length} file${selectedFiles.length > 1 ? 's' : ''} uploaded successfully`,
-        variant: 'default',
-      });
-    } catch (error) {
-      console.error('Error uploading files:', error);
-      toast({
-        title: 'Upload failed',
-        description:
-          'Failed to upload files. Please try again.\n' +
-          (error instanceof Error ? error.message : 'Unknown error'),
-        variant: 'destructive',
+        title: failedCount ? 'Upload finished with errors' : 'Success',
+        description: `${successCount} succeeded, ${failedCount} failed`,
+        variant: failedCount ? 'destructive' : 'default',
       });
     } finally {
       setIsUploading(false);
@@ -335,9 +380,12 @@ export default function Home() {
     }
   };
 
-  const handleRemoveFile = (fileToRemove: File) => {
-    setFiles(files.filter((file) => file !== fileToRemove));
-    toast({ title: 'File removed', description: `${fileToRemove.name} has been removed`, variant: 'default' });
+  const handleRemoveFile = (fileId: string) => {
+    const fileToRemove = files.find((item) => item.id === fileId);
+    setFiles(files.filter((item) => item.id !== fileId));
+    if (fileToRemove) {
+      toast({ title: 'File removed', description: `${fileToRemove.file.name} has been removed`, variant: 'default' });
+    }
   };
 
   return (
@@ -378,11 +426,14 @@ export default function Home() {
         <div className="max-w-5xl mx-auto space-y-4">
           {files.length > 0 && (
             <div className="grid grid-cols-3 gap-2">
-              {files.map((file, index) => (
+              {files.map((item) => (
                 <FilePreview
-                  key={`${file.name}-${index}`}
-                  file={file}
-                  onRemove={() => handleRemoveFile(file)}
+                  key={item.id}
+                  file={item.file}
+                  status={item.status}
+                  error={item.error}
+                  disabled={isIngesting(item.status)}
+                  onRemove={() => handleRemoveFile(item.id)}
                 />
               ))}
             </div>
@@ -415,7 +466,7 @@ export default function Home() {
               <Input
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
-                placeholder={isUploading ? 'Uploading PDF...' : 'Send a message...'}
+                placeholder={isUploading ? 'Ingesting PDFs...' : 'Send a message...'}
                 className="border-0 focus-visible:ring-0 focus-visible:ring-offset-0 h-12 bg-transparent"
                 disabled={isUploading || isLoading || !threadId}
               />
