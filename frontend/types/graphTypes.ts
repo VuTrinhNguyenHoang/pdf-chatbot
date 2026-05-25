@@ -92,7 +92,7 @@ export interface BaseConfiguration {
 
   /**
    * The number of vector-search candidates to fetch before reranking.
-   * @default 12
+   * Defaults to k unless configured.
    */
   candidateK?: number;
 
