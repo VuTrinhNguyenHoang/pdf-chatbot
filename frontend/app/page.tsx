@@ -395,7 +395,7 @@ export default function Home() {
         <KnowledgeSidebar
           refreshTrigger={sidebarRefresh}
           onDocumentDeleted={(filename) => {
-            setFiles((prev) => prev.filter((file) => file.name !== filename));
+            setFiles((prev) => prev.filter((item) => item.file.name !== filename));
           }}
         />
       </aside>
