@@ -19,6 +19,9 @@ export interface ContentEntry {
   filename: string;
   title?: string;
   page?: number;
+  imageUrl?: string;
+  imageMimeType?: string;
+  imageStatus?: string;
 }
 
 export interface FileEntry {
@@ -116,7 +119,18 @@ export async function GET(): Promise<NextResponse<ContentResponse | { error: str
     } else if (contentType === 'image') {
       entry.images++;
       const title = meta.image_title || meta.title;
-      images.push({ ...base, title: title ? String(title) : undefined });
+      const imageUrl = typeof meta.image_data_url === 'string' ? meta.image_data_url : undefined;
+      const imageMimeType = typeof meta.image_mime_type === 'string' ? meta.image_mime_type : undefined;
+      const imageStatus = typeof meta.image_extraction_status === 'string'
+        ? meta.image_extraction_status
+        : undefined;
+      images.push({
+        ...base,
+        title: title ? String(title) : undefined,
+        imageUrl,
+        imageMimeType,
+        imageStatus,
+      });
     }
   }
 
