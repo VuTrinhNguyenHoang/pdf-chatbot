@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { createServerClient } from '@/lib/langgraph-server';
-import { retrievalAssistantStreamConfig } from '@/constants/graphConfigs';
+import { getRetrievalAssistantId, getRetrievalConfig } from '@/config/server';
 
 export const runtime = 'edge';
 
@@ -28,17 +28,8 @@ export async function POST(req: Request) {
       );
     }
 
-    if (!process.env.LANGGRAPH_RETRIEVAL_ASSISTANT_ID) {
-      return new NextResponse(
-        JSON.stringify({
-          error: 'LANGGRAPH_RETRIEVAL_ASSISTANT_ID is not set',
-        }),
-        { status: 500, headers: { 'Content-Type': 'application/json' } },
-      );
-    }
-
     try {
-      const assistantId = process.env.LANGGRAPH_RETRIEVAL_ASSISTANT_ID;
+      const assistantId = getRetrievalAssistantId();
       const serverClient = createServerClient();
 
       const stream = await serverClient.client.runs.stream(
@@ -49,7 +40,7 @@ export async function POST(req: Request) {
           streamMode: ['messages', 'updates'],
           config: {
             configurable: {
-              ...retrievalAssistantStreamConfig,
+              ...getRetrievalConfig(),
             },
           },
         },

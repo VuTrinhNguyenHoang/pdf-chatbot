@@ -1,4 +1,5 @@
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
+import { getSupabaseConfig } from '@/config/server';
 import { NextRequest, NextResponse } from 'next/server';
 
 export const runtime = 'nodejs';
@@ -42,14 +43,12 @@ export interface DeleteContentResponse {
 }
 
 function createSupabaseClient(): SupabaseClient | null {
-  const url = process.env.SUPABASE_URL;
-  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
-
-  if (!url || !key) {
+  try {
+    const config = getSupabaseConfig();
+    return createClient(config.url, config.serviceRoleKey);
+  } catch {
     return null;
   }
-
-  return createClient(url, key);
 }
 
 

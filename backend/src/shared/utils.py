@@ -1,5 +1,7 @@
 from langchain.chat_models import init_chat_model
 
+from src.shared import settings
+
 
 SUPPORTED_PROVIDERS = (
     "openai",
@@ -21,7 +23,10 @@ SUPPORTED_PROVIDERS = (
 )
 
 
-def load_chat_model(fully_specified_name: str, temperature: float = 0.2):
+def load_chat_model(
+    fully_specified_name: str,
+    temperature: float = settings.MODEL_TEMPERATURE,
+):
     index = fully_specified_name.find("/")
     if index == -1:
         if fully_specified_name not in SUPPORTED_PROVIDERS:

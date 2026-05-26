@@ -14,10 +14,9 @@ from src.retrieval_graph.prompts import (
 from src.retrieval_graph.rerank import rerank_documents
 from src.retrieval_graph.state import AgentState
 from src.retrieval_graph.utils import format_docs
+from src.shared import settings
 from src.shared.retrieval import make_retriever
 from src.shared.utils import load_chat_model
-
-MAX_ITERATIONS = 3
 
 
 class RouterDecision(BaseModel):
@@ -80,7 +79,7 @@ def check_enough(state: AgentState, config: RunnableConfig) -> dict:
     iteration = state.get("iteration_count", 0) + 1
 
     # Force proceed after max iterations regardless of sufficiency
-    if iteration >= MAX_ITERATIONS:
+    if iteration >= settings.RETRIEVAL_MAX_ITERATIONS:
         return {"iteration_count": iteration, "is_sufficient": True}
 
     configuration = ensure_agent_configuration(config)

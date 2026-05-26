@@ -1,3 +1,4 @@
+from src.shared import settings
 from src.shared.configuration import BaseConfiguration, ensure_base_configuration
 
 
@@ -14,13 +15,18 @@ def ensure_agent_configuration(config) -> AgentConfiguration:
     base_config["k"] = k
     return AgentConfiguration(
         **base_config,
-        queryModel=str(configurable.get("queryModel") or "openai/gpt-4o-mini"),
-        candidateK=max(k, int(configurable.get("candidateK") or k)),
-        rerank=_as_bool(configurable.get("rerank")),
+        queryModel=str(configurable.get("queryModel") or settings.CHAT_MODEL),
+        candidateK=max(
+            k,
+            int(configurable.get("candidateK") or settings.RETRIEVAL_CANDIDATE_K),
+        ),
+        rerank=_as_bool(configurable.get("rerank"), settings.RETRIEVAL_RERANK),
     )
 
 
-def _as_bool(value) -> bool:
+def _as_bool(value, default: bool) -> bool:
+    if value is None:
+        return default
     if isinstance(value, bool):
         return value
-    return str(value or "").strip().lower() in {"1", "true", "yes", "on"}
+    return str(value).strip().lower() in {"1", "true", "yes", "on"}

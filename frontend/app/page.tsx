@@ -11,8 +11,11 @@ import { ExamplePrompts } from '@/components/example-prompts';
 import { ChatMessage } from '@/components/chat-message';
 import { FilePreview, type FileUploadStatus } from '@/components/file-preview';
 import { KnowledgeSidebar } from '@/components/knowledge-sidebar';
+import { getPublicConfig } from '@/config/public';
 import { client } from '@/lib/langgraph-client';
 import { PDFDocument, StreamActivity } from '@/types/graphTypes';
+
+const publicConfig = getPublicConfig();
 
 type ChatMessageItem = {
   role: 'user' | 'assistant';
@@ -172,7 +175,7 @@ export default function Home() {
         toast({
           title: 'Error',
           description:
-            'Error creating thread. Please make sure you have set the LANGGRAPH_API_URL environment variable correctly. ' + error,
+            'Error creating thread. Please make sure you have set the NEXT_PUBLIC_LANGGRAPH_API_URL environment variable correctly. ' + error,
           variant: 'destructive',
         });
       });
@@ -321,8 +324,12 @@ export default function Home() {
       return;
     }
 
-    if (selectedFiles.length > 5) {
-      toast({ title: 'Too many files', description: 'Please upload at most 5 files at a time', variant: 'destructive' });
+    if (selectedFiles.length > publicConfig.maxUploadFiles) {
+      toast({
+        title: 'Too many files',
+        description: `Please upload at most ${publicConfig.maxUploadFiles} files at a time`,
+        variant: 'destructive',
+      });
       return;
     }
 
