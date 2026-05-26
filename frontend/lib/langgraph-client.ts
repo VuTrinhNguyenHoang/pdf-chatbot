@@ -1,4 +1,5 @@
 import { Client } from '@langchain/langgraph-sdk';
+import { getPublicConfig } from '@/config/public';
 import { LangGraphBase } from './langgraph-base';
 
 // Frontend client singleton instance
@@ -13,12 +14,14 @@ export const createClient = () => {
     return clientInstance;
   }
 
-  if (!process.env.NEXT_PUBLIC_LANGGRAPH_API_URL) {
+  const config = getPublicConfig();
+
+  if (!config.langGraphApiUrl) {
     throw new Error('NEXT_PUBLIC_LANGGRAPH_API_URL is not set');
   }
 
   const client = new Client({
-    apiUrl: process.env.NEXT_PUBLIC_LANGGRAPH_API_URL,
+    apiUrl: config.langGraphApiUrl,
   });
 
   clientInstance = new LangGraphBase(client);

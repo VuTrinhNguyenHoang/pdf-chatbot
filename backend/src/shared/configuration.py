@@ -3,6 +3,8 @@ from typing_extensions import TypedDict
 
 from langchain_core.runnables import RunnableConfig
 
+from src.shared import settings
+
 
 class BaseConfiguration(TypedDict, total=False):
     retrieverProvider: Literal["supabase"]
@@ -15,7 +17,9 @@ def ensure_base_configuration(
 ) -> BaseConfiguration:
     configurable = dict((config or {}).get("configurable", {}))
     return BaseConfiguration(
-        retrieverProvider=str(configurable.get("retrieverProvider") or "supabase"),
+        retrieverProvider=str(
+            configurable.get("retrieverProvider") or settings.RETRIEVER_PROVIDER
+        ),
         filterKwargs=dict(configurable.get("filterKwargs") or {}),
-        k=int(configurable.get("k") or 5),
+        k=int(configurable.get("k") or settings.RETRIEVAL_K),
     )

@@ -1,4 +1,5 @@
 import { Client } from '@langchain/langgraph-sdk';
+import { getLangGraphClientConfig } from '@/config/server';
 import { LangGraphBase } from './langgraph-base';
 
 // Server client singleton instance
@@ -13,20 +14,18 @@ export const createServerClient = () => {
     return clientInstance;
   }
 
-  if (!process.env.NEXT_PUBLIC_LANGGRAPH_API_URL) {
-    throw new Error('NEXT_PUBLIC_LANGGRAPH_API_URL is not set');
-  }
+  const config = getLangGraphClientConfig();
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+  };
 
-  if (!process.env.LANGCHAIN_API_KEY) {
-    throw new Error('LANGCHAIN_API_KEY is not set');
+  if (config.apiKey) {
+    headers['X-Api-Key'] = config.apiKey;
   }
 
   const client = new Client({
-    apiUrl: process.env.NEXT_PUBLIC_LANGGRAPH_API_URL,
-    defaultHeaders: {
-      'Content-Type': 'application/json',
-      'X-Api-Key': process.env.LANGCHAIN_API_KEY,
-    },
+    apiUrl: config.apiUrl,
+    defaultHeaders: headers,
   });
 
   clientInstance = new LangGraphBase(client);

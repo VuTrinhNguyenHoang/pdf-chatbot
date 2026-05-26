@@ -121,7 +121,7 @@ sequenceDiagram
 │   ├── components/
 │   │   ├── chat-message.tsx      # Message, source, and activity rendering
 │   │   └── knowledge-sidebar.tsx # Files, tables, images, deletion UI
-│   ├── constants/graphConfigs.ts # LangGraph IDs and retrieval config
+│   ├── config/                  # Frontend server/public configuration
 │   ├── lib/langgraph-base.ts     # LangGraph SDK wrapper
 │   └── types/graphTypes.ts       # Shared frontend graph types
 ├── package.json                  # Root Yarn workspace scripts
@@ -154,13 +154,30 @@ cp backend/.env.example backend/.env
 cp frontend/.env.example frontend/.env
 ```
 
+Most behavior can be changed through env values. Model names, retrieval settings, upload limits, and image extraction settings should not require code changes.
+
 ### `backend/.env`
 
 ```env
 OPENAI_API_KEY=your-openai-api-key
+
 SUPABASE_URL=https://your-project-ref.supabase.co
 SUPABASE_SERVICE_ROLE_KEY=your-supabase-service-role-key
 
+CHAT_MODEL=openai/gpt-4o-mini
+VISION_MODEL=gpt-4o-mini
+EMBEDDING_MODEL=text-embedding-3-small
+MODEL_TEMPERATURE=0.2
+
+RETRIEVER_PROVIDER=supabase
+RETRIEVAL_K=5
+RETRIEVAL_CANDIDATE_K=12
+RETRIEVAL_RERANK=true
+RETRIEVAL_MAX_ITERATIONS=3
+
+DOCLING_OCR=true
+DOCLING_TABLE_STRUCTURE=true
+ENABLE_IMAGE_EXTRACTION=true
 ENABLE_IMAGE_DESCRIPTIONS=true
 MAX_IMAGE_DESCRIPTIONS_PER_FILE=20
 PDF_IMAGE_SCALE=2.0
@@ -182,6 +199,15 @@ LANGGRAPH_RETRIEVAL_ASSISTANT_ID=retrieval_graph
 SUPABASE_URL=https://your-project-ref.supabase.co
 SUPABASE_SERVICE_ROLE_KEY=your-supabase-service-role-key
 
+CHAT_MODEL=openai/gpt-4o-mini
+RETRIEVAL_K=5
+RETRIEVAL_CANDIDATE_K=12
+RETRIEVAL_RERANK=true
+
+NEXT_PUBLIC_MAX_UPLOAD_FILES=5
+NEXT_PUBLIC_MAX_UPLOAD_MB=10
+NEXT_PUBLIC_KNOWLEDGE_PAGE_SIZE=10
+
 LANGCHAIN_TRACING_V2=true
 LANGCHAIN_API_KEY=your-langsmith-api-key
 LANGCHAIN_PROJECT=pdf-chatbot
@@ -194,14 +220,29 @@ LANGCHAIN_PROJECT=pdf-chatbot
 | `OPENAI_API_KEY` | Yes | Backend | OpenAI API key for chat, embeddings, reranking, and optional vision descriptions. |
 | `SUPABASE_URL` | Yes | Backend, Frontend API routes | Supabase project URL. |
 | `SUPABASE_SERVICE_ROLE_KEY` | Yes | Backend, Frontend API routes | Server-side key for insert, list, and delete operations. Do not expose it with `NEXT_PUBLIC_`. |
-| `NEXT_PUBLIC_LANGGRAPH_API_URL` | Yes | Frontend | LangGraph API URL, usually `http://localhost:2024`. |
-| `LANGGRAPH_INGESTION_ASSISTANT_ID` | Yes | Frontend | LangGraph assistant ID for ingestion. |
-| `LANGGRAPH_RETRIEVAL_ASSISTANT_ID` | Yes | Frontend | LangGraph assistant ID for retrieval/chat. |
+| `NEXT_PUBLIC_LANGGRAPH_API_URL` | Yes | Frontend, Frontend API routes | LangGraph API URL, usually `http://localhost:2024`. |
+| `LANGGRAPH_INGESTION_ASSISTANT_ID` | Yes | Frontend API routes | LangGraph assistant ID for ingestion. |
+| `LANGGRAPH_RETRIEVAL_ASSISTANT_ID` | Yes | Frontend API routes | LangGraph assistant ID for retrieval/chat. |
+| `CHAT_MODEL` | No | Backend, Frontend API routes | Chat, routing, reranking, and answer model. Default: `openai/gpt-4o-mini`. |
+| `VISION_MODEL` | No | Backend | Vision model for image descriptions. Default: `gpt-4o-mini`. |
+| `EMBEDDING_MODEL` | No | Backend | Embedding model. Default: `text-embedding-3-small`. Changing dimensions requires Supabase schema changes. |
+| `MODEL_TEMPERATURE` | No | Backend | Temperature for chat-model calls. Default: `0.2`. |
+| `RETRIEVER_PROVIDER` | No | Backend | Retriever backend. Current supported value: `supabase`. |
+| `RETRIEVAL_K` | No | Backend, Frontend API routes | Final number of documents used for answer generation. Default: `5`. |
+| `RETRIEVAL_CANDIDATE_K` | No | Backend, Frontend API routes | Vector candidates fetched before reranking. Default: `12`. |
+| `RETRIEVAL_RERANK` | No | Backend, Frontend API routes | Enables LLM reranking. Default: `true`. |
+| `RETRIEVAL_MAX_ITERATIONS` | No | Backend | Maximum retrieval sufficiency loop count. Default: `3`. |
+| `DOCLING_OCR` | No | Backend | Enables Docling OCR. Default: `true`. |
+| `DOCLING_TABLE_STRUCTURE` | No | Backend | Enables Docling table structure extraction. Default: `true`. |
+| `ENABLE_IMAGE_EXTRACTION` | No | Backend | Enables image item extraction and preview generation. Default: `true`. |
 | `ENABLE_IMAGE_DESCRIPTIONS` | No | Backend | Set `false` to skip vision-model image descriptions while still extracting image previews. |
 | `MAX_IMAGE_DESCRIPTIONS_PER_FILE` | No | Backend | Maximum number of images per file sent to the vision model. Default: `20`. |
 | `PDF_IMAGE_SCALE` | No | Backend | Docling image rendering scale. Default: `2.0`. |
 | `PDF_IMAGE_MAX_EDGE` | No | Backend | Maximum edge size for stored image previews. Default: `1400`. |
 | `MAX_IMAGE_PREVIEW_BYTES` | No | Backend | Maximum encoded preview bytes stored in metadata. Default: `1500000`. |
+| `NEXT_PUBLIC_MAX_UPLOAD_FILES` | No | Frontend | Maximum PDFs selectable per upload batch. Default: `5`. |
+| `NEXT_PUBLIC_MAX_UPLOAD_MB` | No | Frontend, Frontend API routes | Maximum size per PDF. Default: `10`. |
+| `NEXT_PUBLIC_KNOWLEDGE_PAGE_SIZE` | No | Frontend | Reserved sidebar page size for future pagination. Default: `10`. |
 | `LANGCHAIN_TRACING_V2` | No | Backend, Frontend API routes | Enables LangSmith tracing when set to `true`. |
 | `LANGCHAIN_API_KEY` | No | Backend, Frontend API routes | LangSmith API key. |
 | `LANGCHAIN_PROJECT` | No | Backend, Frontend API routes | LangSmith project name. |
@@ -321,17 +362,19 @@ git diff --check
 
 ## Retrieval Configuration
 
-The frontend retrieval configuration is defined in `frontend/constants/graphConfigs.ts`.
+Retrieval defaults are centralized in env values and read by both the frontend API route and backend graph fallback.
 
 Current default behavior:
 
-- Fetch `candidateK=12` vector-search candidates.
-- Rerank candidates with an LLM.
-- Keep `k=5` final documents for answer generation.
+- `CHAT_MODEL=openai/gpt-4o-mini`
+- `RETRIEVAL_CANDIDATE_K=12` vector-search candidates before reranking.
+- `RETRIEVAL_RERANK=true` to rerank candidates with an LLM.
+- `RETRIEVAL_K=5` final documents for answer generation.
+- `RETRIEVAL_MAX_ITERATIONS=3` sufficiency-check iterations.
 
 ## Image Extraction Configuration
 
-Image extraction is enabled in the parser by Docling `PdfPipelineOptions.generate_picture_images = true`.
+Image extraction is controlled by `ENABLE_IMAGE_EXTRACTION`. When enabled, the parser sets Docling `PdfPipelineOptions.generate_picture_images = true`.
 
 There are three separate image-related behaviors:
 
@@ -339,11 +382,12 @@ There are three separate image-related behaviors:
 2. Preview storage in document metadata.
 3. Optional text descriptions generated by the vision model.
 
-`ENABLE_IMAGE_DESCRIPTIONS=false` disables only the vision-model description step. It does not disable image detection or preview extraction.
+`ENABLE_IMAGE_DESCRIPTIONS=false` disables only the vision-model description step. It does not disable image detection or preview extraction when `ENABLE_IMAGE_EXTRACTION=true`.
 
 Default image limits:
 
 ```env
+ENABLE_IMAGE_EXTRACTION=true
 ENABLE_IMAGE_DESCRIPTIONS=true
 MAX_IMAGE_DESCRIPTIONS_PER_FILE=20
 PDF_IMAGE_SCALE=2.0
@@ -354,6 +398,7 @@ MAX_IMAGE_PREVIEW_BYTES=1500000
 For local testing with very high limits:
 
 ```env
+ENABLE_IMAGE_EXTRACTION=true
 ENABLE_IMAGE_DESCRIPTIONS=true
 MAX_IMAGE_DESCRIPTIONS_PER_FILE=999999
 MAX_IMAGE_PREVIEW_BYTES=100000000
@@ -370,10 +415,9 @@ The code currently expects numeric values. It does not support `unlimited` as a 
 - Keep `SUPABASE_SERVICE_ROLE_KEY` server-side only. Do not prefix it with `NEXT_PUBLIC_`.
 - `frontend/.env` also needs Supabase credentials because `/api/content` lists and deletes document rows from a Next.js server route.
 - The app currently accepts only PDF uploads.
-- The upload endpoint rejects files larger than `10MB`.
-- The current UI upload flow is designed for up to `5` files per ingest batch.
+- The upload limit defaults to `5` files per batch and `10MB` per file. Change `NEXT_PUBLIC_MAX_UPLOAD_FILES` and `NEXT_PUBLIC_MAX_UPLOAD_MB` to adjust it.
 - If an image is detected but the preview is too large, the image still appears in the sidebar, but the dialog shows a fallback instead of a preview.
-- If no images appear for a PDF, Docling likely did not classify any element as a `PictureItem` for that file.
+- If no images appear for a PDF, check `ENABLE_IMAGE_EXTRACTION`; if it is enabled, Docling likely did not classify any element as a `PictureItem` for that file.
 - Browserlist warnings during frontend build are informational and do not block the build.
 
 ## Current Limitations

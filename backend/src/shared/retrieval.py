@@ -1,4 +1,3 @@
-import os
 from dataclasses import dataclass
 
 from langchain_community.vectorstores import SupabaseVectorStore
@@ -6,9 +5,8 @@ from langchain_core.documents import Document
 from langchain_openai import OpenAIEmbeddings
 from supabase import create_client
 
+from src.shared import settings
 from src.shared.configuration import BaseConfiguration, ensure_base_configuration
-
-DEFAULT_EMBEDDING_MODEL = "text-embedding-3-small"
 
 PUBLIC_METADATA_KEYS = (
     "uuid",
@@ -92,22 +90,21 @@ class VectorStoreRetrieverHandle:
 
 
 def load_embeddings() -> OpenAIEmbeddings:
-    model_name = os.getenv("EMBEDDING_MODEL", DEFAULT_EMBEDDING_MODEL)
-    return OpenAIEmbeddings(model=model_name)
+    return OpenAIEmbeddings(model=settings.EMBEDDING_MODEL)
 
 
 def make_supabase_retriever(
     configuration: BaseConfiguration,
 ) -> VectorStoreRetrieverHandle:
-    if not os.getenv("SUPABASE_URL") or not os.getenv("SUPABASE_SERVICE_ROLE_KEY"):
+    if not settings.SUPABASE_URL or not settings.SUPABASE_SERVICE_ROLE_KEY:
         raise ValueError(
             "SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY environment variables are not defined"
         )
 
     embeddings = load_embeddings()
     supabase_client = create_client(
-        os.environ.get("SUPABASE_URL", ""),
-        os.environ.get("SUPABASE_SERVICE_ROLE_KEY", ""),
+        settings.SUPABASE_URL,
+        settings.SUPABASE_SERVICE_ROLE_KEY,
     )
     vector_store = SupabaseVectorStore(
         client=supabase_client,

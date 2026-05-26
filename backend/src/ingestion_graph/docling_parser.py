@@ -1,7 +1,6 @@
 import base64
 import hashlib
 import io
-import os
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
@@ -17,12 +16,8 @@ from openai import OpenAI
 from PIL import Image
 
 from src.ingestion_graph.state import IndexSource
+from src.shared import settings
 
-VISION_MODEL = "gpt-4o-mini"
-DEFAULT_IMAGE_SCALE = 2.0
-DEFAULT_IMAGE_MAX_EDGE = 1400
-DEFAULT_MAX_IMAGE_PREVIEW_BYTES = 1_500_000
-DEFAULT_MAX_IMAGE_DESCRIPTIONS_PER_FILE = 20
 VISION_PROMPT = (
     "Describe this image concisely (2-4 sentences). Include: what the image shows, "
     "any visible text, numbers, or labels, and the insight it provides in a document "
@@ -40,7 +35,7 @@ class ImagePreview:
 def parse_sources_with_docling(sources: list[IndexSource]) -> list[Document]:
     converter = _make_document_converter()
     chunker = HybridChunker(repeat_table_header=True)
-    vision = OpenAI() if _image_descriptions_enabled() else None
+    vision = OpenAI() if settings.ENABLE_IMAGE_DESCRIPTIONS else None
     image_cache: dict[str, str] = {}
 
     all_docs: list[Document] = []
@@ -52,7 +47,7 @@ def parse_sources_with_docling(sources: list[IndexSource]) -> list[Document]:
             chunks = list(chunker.chunk(dl_doc))
             seen_tables: set[str] = set()
             seen_pictures: set[str] = set()
-            image_budget = {"remaining": _max_image_descriptions_per_file()}
+            image_budget = {"remaining": settings.MAX_IMAGE_DESCRIPTIONS_PER_FILE}
             for idx, chunk in enumerate(chunks):
                 doc_items = list(chunk.meta.doc_items or [])
                 doc = _chunk_to_document(
@@ -69,6 +64,9 @@ def parse_sources_with_docling(sources: list[IndexSource]) -> list[Document]:
                     all_docs.append(doc)
                     if doc.metadata.get("content_type") == "image":
                         seen_pictures.update(_picture_refs(doc_items))
+
+            if not settings.ENABLE_IMAGE_EXTRACTION:
+                continue
 
             for picture_idx, picture in enumerate(getattr(dl_doc, "pictures", [])):
                 if _picture_ref(picture) in seen_pictures:
@@ -92,8 +90,10 @@ def parse_sources_with_docling(sources: list[IndexSource]) -> list[Document]:
 
 def _make_document_converter() -> DocumentConverter:
     options = PdfPipelineOptions()
-    options.generate_picture_images = True
-    options.images_scale = _image_scale()
+    options.generate_picture_images = settings.ENABLE_IMAGE_EXTRACTION
+    options.images_scale = settings.PDF_IMAGE_SCALE
+    options.do_ocr = settings.DOCLING_OCR
+    options.do_table_structure = settings.DOCLING_TABLE_STRUCTURE
     return DocumentConverter(
         format_options={InputFormat.PDF: PdfFormatOption(pipeline_options=options)},
     )
@@ -132,6 +132,9 @@ def _chunk_to_document(
     title = _extract_title(chunk)
     bboxes = _extract_bboxes(doc_items)
     source_file = Path(filename).name
+
+    if content_type == "image" and not settings.ENABLE_IMAGE_EXTRACTION:
+        return None
 
     image_preview = (
         _extract_image_preview(doc_items, dl_doc) if content_type == "image" else None
@@ -237,7 +240,7 @@ def _extract_image_preview(doc_items, dl_doc) -> ImagePreview:
             if pil_img is None:
                 continue
             encoded = _encode_image_preview(pil_img)
-            if len(encoded) > _max_image_preview_bytes():
+            if len(encoded) > settings.MAX_IMAGE_PREVIEW_BYTES:
                 return ImagePreview(None, None, "too_large")
             return ImagePreview(encoded, "image/jpeg", "extracted")
         except Exception:
@@ -247,7 +250,7 @@ def _extract_image_preview(doc_items, dl_doc) -> ImagePreview:
 
 def _encode_image_preview(pil_img) -> bytes:
     image = pil_img.copy()
-    image.thumbnail((_image_max_edge(), _image_max_edge()))
+    image.thumbnail((settings.PDF_IMAGE_MAX_EDGE, settings.PDF_IMAGE_MAX_EDGE))
     if image.mode in {"RGBA", "LA"}:
         bg = Image.new("RGB", image.size, "white")
         bg.paste(image, mask=image.getchannel("A"))
@@ -280,7 +283,7 @@ def _describe_image(
         image_budget["remaining"] -= 1
         b64 = base64.b64encode(image_preview.data).decode()
         resp = vision.chat.completions.create(
-            model=VISION_MODEL,
+            model=settings.VISION_MODEL,
             messages=[{
                 "role": "user",
                 "content": [
@@ -317,51 +320,6 @@ def _image_data_url(image_preview: ImagePreview | None) -> str | None:
 
 def _image_fallback(fallback: str) -> str:
     return fallback or "Image extracted from the document."
-
-
-def _image_descriptions_enabled() -> bool:
-    value = os.getenv("ENABLE_IMAGE_DESCRIPTIONS", "true").strip().lower()
-    return value not in {"0", "false", "no", "off"}
-
-
-def _image_scale() -> float:
-    value = os.getenv("PDF_IMAGE_SCALE")
-    if not value:
-        return DEFAULT_IMAGE_SCALE
-    try:
-        return max(1.0, float(value))
-    except ValueError:
-        return DEFAULT_IMAGE_SCALE
-
-
-def _image_max_edge() -> int:
-    value = os.getenv("PDF_IMAGE_MAX_EDGE")
-    if not value:
-        return DEFAULT_IMAGE_MAX_EDGE
-    try:
-        return max(320, int(value))
-    except ValueError:
-        return DEFAULT_IMAGE_MAX_EDGE
-
-
-def _max_image_preview_bytes() -> int:
-    value = os.getenv("MAX_IMAGE_PREVIEW_BYTES")
-    if not value:
-        return DEFAULT_MAX_IMAGE_PREVIEW_BYTES
-    try:
-        return max(0, int(value))
-    except ValueError:
-        return DEFAULT_MAX_IMAGE_PREVIEW_BYTES
-
-
-def _max_image_descriptions_per_file() -> int:
-    value = os.getenv("MAX_IMAGE_DESCRIPTIONS_PER_FILE")
-    if not value:
-        return DEFAULT_MAX_IMAGE_DESCRIPTIONS_PER_FILE
-    try:
-        return max(0, int(value))
-    except ValueError:
-        return DEFAULT_MAX_IMAGE_DESCRIPTIONS_PER_FILE
 
 
 def _content_type(labels: set[DocItemLabel]) -> str:
