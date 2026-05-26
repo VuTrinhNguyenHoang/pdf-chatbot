@@ -19,7 +19,7 @@ import type {
   ContentResponse,
   DeleteContentResponse,
   FileEntry,
-} from '@/app/api/content/route';
+} from '@/types/content';
 
 type Tab = 'files' | 'tables' | 'images';
 

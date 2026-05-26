@@ -1,221 +1,49 @@
-import { createClient, type SupabaseClient } from '@supabase/supabase-js';
-import { getSupabaseConfig } from '@/config/server';
-import { NextRequest, NextResponse } from 'next/server';
+import { NextResponse, type NextRequest } from 'next/server';
+import {
+  deleteContentByFilename,
+  listContent,
+} from './content-service';
+import { ContentServiceError } from './content-error';
+import type { ContentResponse, DeleteContentResponse } from '@/types/content';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-interface SupabaseRow {
-  id: string;
-  content: string;
-  metadata: Record<string, unknown> | null;
-}
+type ErrorResponse = { error: string };
 
-const CONTENT_PAGE_SIZE = 500;
-const DELETE_BATCH_SIZE = 100;
-
-export interface ContentEntry {
-  id: string;
-  content: string;
-  filename: string;
-  title?: string;
-  page?: number;
-  imageUrl?: string;
-  imageMimeType?: string;
-  imageStatus?: string;
-}
-
-export interface FileEntry {
-  filename: string;
-  chunks: number;
-  tables: number;
-  images: number;
-}
-
-export interface ContentResponse {
-  files: FileEntry[];
-  tables: ContentEntry[];
-  images: ContentEntry[];
-}
-
-export interface DeleteContentResponse {
-  deleted: number;
-}
-
-function createSupabaseClient(): SupabaseClient | null {
+export async function GET(): Promise<NextResponse<ContentResponse | ErrorResponse>> {
   try {
-    const config = getSupabaseConfig();
-    return createClient(config.url, config.serviceRoleKey);
-  } catch {
-    return null;
-  }
-}
-
-
-async function fetchContentRows(supabase: SupabaseClient): Promise<SupabaseRow[]> {
-  const rows: SupabaseRow[] = [];
-
-  for (let from = 0; ; from += CONTENT_PAGE_SIZE) {
-    const { data, error } = await supabase
-      .from('documents')
-      .select('id, content, metadata')
-      .order('id', { ascending: true })
-      .range(from, from + CONTENT_PAGE_SIZE - 1);
-
-    if (error) throw new Error(error.message);
-
-    rows.push(...((data as SupabaseRow[]) ?? []));
-    if (!data || data.length < CONTENT_PAGE_SIZE) break;
-  }
-
-  return rows;
-}
-
-export async function GET(): Promise<NextResponse<ContentResponse | { error: string }>> {
-  const supabase = createSupabaseClient();
-
-  if (!supabase) {
-    return NextResponse.json({ error: 'Supabase not configured' }, { status: 500 });
-  }
-
-  let rows: SupabaseRow[];
-
-  try {
-    rows = await fetchContentRows(supabase);
+    return NextResponse.json(await listContent(), {
+      headers: { 'Cache-Control': 'no-store' },
+    });
   } catch (error) {
-    return NextResponse.json(
-      { error: error instanceof Error ? error.message : 'Failed to load content' },
-      { status: 500 },
-    );
+    return contentErrorResponse(error, 'Failed to load content');
   }
-
-  const filesMap = new Map<string, FileEntry>();
-  const tables: ContentEntry[] = [];
-  const images: ContentEntry[] = [];
-
-  for (const row of rows) {
-    const meta = row.metadata || {};
-    const filename = String(meta.source_file || meta.filename || 'Unknown');
-    const contentType = String(meta.content_type || 'text');
-
-    if (!filesMap.has(filename)) {
-      filesMap.set(filename, { filename, chunks: 0, tables: 0, images: 0 });
-    }
-    const entry = filesMap.get(filename)!;
-    entry.chunks++;
-
-    const base: ContentEntry = {
-      id: row.id,
-      content: row.content,
-      filename,
-      page: meta.page_start as number | undefined,
-    };
-
-    if (contentType === 'table') {
-      entry.tables++;
-      const title = meta.table_title || meta.title;
-      tables.push({ ...base, title: title ? String(title) : undefined });
-    } else if (contentType === 'image') {
-      entry.images++;
-      const title = meta.image_title || meta.title;
-      const imageUrl = typeof meta.image_data_url === 'string' ? meta.image_data_url : undefined;
-      const imageMimeType = typeof meta.image_mime_type === 'string' ? meta.image_mime_type : undefined;
-      const imageStatus = typeof meta.image_extraction_status === 'string'
-        ? meta.image_extraction_status
-        : undefined;
-      images.push({
-        ...base,
-        title: title ? String(title) : undefined,
-        imageUrl,
-        imageMimeType,
-        imageStatus,
-      });
-    }
-  }
-
-  return NextResponse.json(
-    { files: Array.from(filesMap.values()), tables, images },
-    { headers: { 'Cache-Control': 'no-store' } },
-  );
-}
-
-
-async function findDocumentIdsByFilename(
-  supabase: SupabaseClient,
-  filename: string,
-): Promise<string[]> {
-  const ids: string[] = [];
-
-  for (let from = 0; ; from += CONTENT_PAGE_SIZE) {
-    const { data, error } = await supabase
-      .from('documents')
-      .select('id, metadata')
-      .order('id', { ascending: true })
-      .range(from, from + CONTENT_PAGE_SIZE - 1);
-
-    if (error) throw new Error(error.message);
-
-    const rows = (data as Pick<SupabaseRow, 'id' | 'metadata'>[]) ?? [];
-    ids.push(
-      ...rows
-        .filter((row) => {
-          const metadata = row.metadata || {};
-          return metadata.source_file === filename || metadata.filename === filename;
-        })
-        .map((row) => row.id),
-    );
-
-    if (rows.length < CONTENT_PAGE_SIZE) break;
-  }
-
-  return ids;
-}
-
-async function deleteDocumentIds(
-  supabase: SupabaseClient,
-  ids: string[],
-): Promise<number> {
-  let deleted = 0;
-
-  for (let index = 0; index < ids.length; index += DELETE_BATCH_SIZE) {
-    const batch = ids.slice(index, index + DELETE_BATCH_SIZE);
-    const { error } = await supabase.from('documents').delete().in('id', batch);
-
-    if (error) throw new Error(error.message);
-    deleted += batch.length;
-  }
-
-  return deleted;
 }
 
 export async function DELETE(
   request: NextRequest,
-): Promise<NextResponse<DeleteContentResponse | { error: string }>> {
-  const supabase = createSupabaseClient();
+): Promise<NextResponse<DeleteContentResponse | ErrorResponse>> {
+  const payload = await request.json() as { filename?: unknown };
 
-  if (!supabase) {
-    return NextResponse.json({ error: 'Supabase not configured' }, { status: 500 });
-  }
-
-  const { filename } = await request.json();
-
-  if (!filename || typeof filename !== 'string') {
+  if (!payload.filename || typeof payload.filename !== 'string') {
     return NextResponse.json({ error: 'Filename is required' }, { status: 400 });
   }
 
   try {
-    const ids = await findDocumentIdsByFilename(supabase, filename);
-
-    if (!ids.length) {
-      return NextResponse.json({ deleted: 0 });
-    }
-
-    const deleted = await deleteDocumentIds(supabase, ids);
-    return NextResponse.json({ deleted });
+    return NextResponse.json(await deleteContentByFilename(payload.filename));
   } catch (error) {
-    return NextResponse.json(
-      { error: error instanceof Error ? error.message : 'Failed to delete file' },
-      { status: 500 },
-    );
+    return contentErrorResponse(error, 'Failed to delete file');
   }
+}
+
+function contentErrorResponse(error: unknown, fallback: string) {
+  if (error instanceof ContentServiceError) {
+    return NextResponse.json({ error: error.message }, { status: error.status });
+  }
+
+  return NextResponse.json(
+    { error: error instanceof Error ? error.message : fallback },
+    { status: 500 },
+  );
 }
