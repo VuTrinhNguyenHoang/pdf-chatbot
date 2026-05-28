@@ -16,3 +16,6 @@ test_docs
 # claude
 CLAUDE.md
 .claude/
+# eval outputs
+backend/eval/artifacts/
+backend/eval/runs/*.json
